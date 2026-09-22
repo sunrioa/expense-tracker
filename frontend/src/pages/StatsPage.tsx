@@ -518,7 +518,7 @@ export default function StatsPage() {
                   <b style={{ color: ct.summaryText }}>{yuan(sum)}</b>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={2}>
-                  <Tag color="blue" bordered={false}>
+                  <Tag bordered={false}>
                     100%
                   </Tag>
                 </Table.Summary.Cell>

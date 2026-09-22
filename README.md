@@ -21,17 +21,24 @@
 - **就地编辑** —— 表格里点任意单元格直接改，不用打开编辑弹窗
 - **按月批量生成** —— 「房租」这类固定支出，一次铺满 12 个月，重复的自动跳过
 - **统计** —— 按月/按年切换，柱状图 + 累计趋势 + 构成饼图 + 排行
+- **深色模式** —— 跟随系统，界面、图表、组件库同时切换，不用刷新
 - **老库自动迁移** —— 从按天记账的旧版本升级不用手动改库
 
 ## 界面
 
+浅色 / 深色跟随系统。
+
 **记账页**
 
-![记账页](docs/screenshots/ledger.png)
+| 浅色 | 深色 |
+| --- | --- |
+| ![记账页](docs/screenshots/ledger.png) | ![记账页·深色](docs/screenshots/ledger-dark.png) |
 
 **统计页**
 
-![统计页](docs/screenshots/stats.png)
+| 浅色 | 深色 |
+| --- | --- |
+| ![统计页](docs/screenshots/stats.png) | ![统计页·深色](docs/screenshots/stats-dark.png) |
 
 ---
 
