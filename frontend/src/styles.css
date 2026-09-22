@@ -1320,6 +1320,89 @@ body {
   color: var(--text-sub);
 }
 
+/* ---------- 手机：吸顶月份条 ---------- */
+
+/*
+ * 钉在导航栏下面，左右箭头直接翻月。
+ * 记账最常做的事是「翻到上个月看看花了多少」，
+ * 把月份选择器留在页面顶部意味着每次对比都要先滚回去。
+ */
+.month-bar {
+  position: sticky;
+  top: 64px;
+  z-index: 19;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* 负边距让它顶到内容区边缘，视觉上和导航栏连成一体 */
+  margin: -10px -10px 12px;
+  padding: 6px 8px;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 6px 16px -14px rgb(0 0 0 / 0.55);
+}
+
+.month-step,
+.month-more {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-sub);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.month-step:active,
+.month-more:active {
+  background: var(--brand-tint);
+}
+
+.month-step:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.month-current.ant-picker {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.month-current .ant-picker-input > input {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--heading);
+  cursor: pointer;
+}
+
+/* 有筛选条件在生效时点个小红点，否则用户不知道列表为什么少了 */
+.month-more.has-filter::after {
+  content: '';
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--clay);
+}
+
+.drawer-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 /* ===================================================================
    动效
    -------------------------------------------------------------------
@@ -1448,6 +1531,12 @@ body {
 
 /* 统计卡有自己的错峰入场，不再跟着外层整体上浮，否则两段动画叠起来会拖沓 */
 .page > .stat-row {
+  animation: none;
+}
+
+/* 吸顶元素不参与入场位移：动画期间的 transform 会让 sticky 抖一下 */
+.page > .month-bar,
+.page > .stats-filter {
   animation: none;
 }
 
@@ -1672,20 +1761,40 @@ body {
     line-height: 1.45;
   }
 
-  /* 统计页顶部筛选条：每一项都撑满一行 */
-  .stats-bar > .ant-col {
-    width: 100%;
+  /* 统计页筛选条同样吸顶，并压成一行：分段控件 + 区间 + 图标化的刷新 */
+  .stats-filter {
+    position: sticky;
+    top: 64px;
+    z-index: 19;
+    margin: -10px -10px 12px;
+    border-radius: 0;
+  }
+
+  .stats-filter .ant-card-body {
+    padding: 8px 10px;
+  }
+
+  .stats-bar {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .stats-bar > .ant-col:first-child {
+    flex: 1;
+    min-width: 0;
   }
 
   .stats-bar .ant-space {
     width: 100%;
+    flex-wrap: nowrap;
+  }
+
+  .stats-bar .ant-space-item:last-child {
+    flex: 1;
+    min-width: 0;
   }
 
   .stats-bar .ant-picker-range {
-    width: 100%;
-  }
-
-  .stats-bar .ant-btn {
     width: 100%;
   }
 }

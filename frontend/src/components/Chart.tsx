@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as echarts from 'echarts';
 import type { ECharts, EChartsOption } from 'echarts';
 
@@ -12,6 +12,12 @@ export interface ChartProps {
 
 /**
  * 轻量 ECharts 包装：选项变化时重绘，容器尺寸变化时自适应。
+ *
+ * 容器用「回调 ref + state」而不是 useRef ——
+ * 空态和有数据态渲染的是两个不同的 div，用 useRef 的话实例会一直绑在
+ * 先挂载的那个节点上：切到空态时那个节点被卸载，再切回来 setOption 就画进了
+ * 一个脱离文档的 canvas，图表区域一片空白，且不会自行恢复。
+ * 改成 state 之后，节点变化会触发 effect 重跑，旧实例 dispose、新节点重新 init。
  */
 export default function Chart({
   option,
@@ -19,42 +25,29 @@ export default function Chart({
   empty = false,
   emptyText = '暂无数据'
 }: ChartProps) {
-  const boxRef = useRef<HTMLDivElement | null>(null);
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
   const chartRef = useRef<ECharts | null>(null);
-  const observerRef = useRef<ResizeObserver | null>(null);
 
+  // 实例的生命周期严格跟着容器节点走
   useEffect(() => {
-    // 原来这里只判断了 boxRef / empty，option 是否存在靠调用方自觉。
-    // 类型收紧后顺手补上，空 option 直接跳过绘制。
-    if (!boxRef.current || empty || !option) return undefined;
+    if (!box) return undefined;
+    const chart = echarts.init(box, null, { renderer: 'canvas' });
+    chartRef.current = chart;
 
-    if (!chartRef.current) {
-      chartRef.current = echarts.init(boxRef.current, null, { renderer: 'canvas' });
-    }
-    chartRef.current.setOption(option, true);
+    const observer = new ResizeObserver(() => chart.resize());
+    observer.observe(box);
 
-    if (!observerRef.current) {
-      observerRef.current = new ResizeObserver(() => {
-        if (chartRef.current) chartRef.current.resize();
-      });
-      observerRef.current.observe(boxRef.current);
-    }
-    return undefined;
-  }, [option, empty]);
+    return () => {
+      observer.disconnect();
+      chart.dispose();
+      chartRef.current = null;
+    };
+  }, [box]);
 
-  useEffect(
-    () => () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
-        observerRef.current = null;
-      }
-      if (chartRef.current) {
-        chartRef.current.dispose();
-        chartRef.current = null;
-      }
-    },
-    []
-  );
+  // box 也要进依赖：重新 init 之后必须把选项再喂一次
+  useEffect(() => {
+    if (chartRef.current && option) chartRef.current.setOption(option, true);
+  }, [option, box]);
 
   if (empty) {
     return (
@@ -63,5 +56,5 @@ export default function Chart({
       </div>
     );
   }
-  return <div ref={boxRef} className="chart-box" style={{ width: '100%', height }} />;
+  return <div ref={setBox} className="chart-box" style={{ width: '100%', height }} />;
 }

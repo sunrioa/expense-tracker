@@ -378,16 +378,17 @@ export default function StatsPage() {
 
   return (
     <div className="page">
-      <Card className="section-card" size="small">
+      <Card className="section-card stats-filter" size="small">
         <Row gutter={[12, 12]} align="middle" justify="space-between" className="stats-bar">
           <Col>
             <Space wrap className="stats-range">
               <Segmented<Granularity>
                 value={granularity}
                 onChange={setGranularity}
+                // 窄屏用短标签，否则分段控件 + 区间选择器一行放不下
                 options={[
-                  { label: '按月统计', value: 'month' },
-                  { label: '按年统计', value: 'year' }
+                  { label: isNarrow ? '按月' : '按月统计', value: 'month' },
+                  { label: isNarrow ? '按年' : '按年统计', value: 'year' }
                 ]}
               />
               <RangePicker
@@ -405,7 +406,7 @@ export default function StatsPage() {
           </Col>
           <Col>
             <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
-              刷新
+              {isNarrow ? '' : '刷新'}
             </Button>
           </Col>
         </Row>

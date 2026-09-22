@@ -46,6 +46,7 @@ import { currentPeriod, money, periodLabel, sumAmounts, walkTree, yuan } from '.
 import { errMsg } from '../utils/error';
 import { useCountUp } from '../hooks/useCountUp';
 import { useIsNarrow } from '../hooks/useMediaQuery';
+import MonthBar from '../components/MonthBar';
 import RecordCardList from '../components/RecordCardList';
 import RecordEditDrawer from '../components/RecordEditDrawer';
 
@@ -328,6 +329,7 @@ export default function LedgerPage() {
   /* 手机专用：右下角悬浮按钮唤起的添加抽屉，以及点条目打开的编辑抽屉 */
   const isNarrow = useIsNarrow();
   const [quickOpen, setQuickOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [editing, setEditing] = useState<RecordNode | null>(null);
 
   /* ---------------- 数据加载 ---------------- */
@@ -839,8 +841,19 @@ export default function LedgerPage() {
   return (
     <div className="page">
       {/* ---------- 筛选 ---------- */}
+      {/*
+        手机上整张筛选卡换成吸顶月份条：记账最常做的事是「翻到上个月看看花了多少」，
+        原来每次对比都得先滚回页面顶部。
+      */}
+      {isNarrow ? (
+        <MonthBar
+          month={month}
+          onChange={setMonth}
+          onMore={() => setMoreOpen(true)}
+          hasFilter={!!keyword}
+        />
+      ) : (
       <Card className="section-card bar-teal" size="small">
-        {/* 这段说明在手机上要占掉三分之一屏，只在桌面显示 */}
         {!isNarrow && (
           <div className="hint-block">
             按月记账：每条记录都归属到某个月，金额填这个月该项花的总额即可，不用按天记。
@@ -900,6 +913,7 @@ export default function LedgerPage() {
           </div>
         </div>
       </Card>
+      )}
 
       {/* ---------- 合计（手机上这是第一屏最重要的数字） ---------- */}
       <Card className="section-card bar-sage" size="small">
@@ -1026,6 +1040,110 @@ export default function LedgerPage() {
             <label>归到哪个顶级条目下</label>
             {quickParentPicker}
             <span className="field-hint">留空 = 新建一个顶级条目。子项只支持一层</span>
+          </div>
+        </div>
+      </Drawer>
+
+      {/* ---------- 手机：更多筛选与操作 ---------- */}
+      <Drawer
+        open={isNarrow && moreOpen}
+        onClose={() => setMoreOpen(false)}
+        placement="bottom"
+        height="auto"
+        title="筛选与操作"
+        className="edit-drawer"
+        footer={
+          <div className="drawer-footer">
+            <Button onClick={() => setMoreOpen(false)}>关闭</Button>
+          </div>
+        }
+      >
+        <div className="drawer-form">
+          <div className="quick-field">
+            <label>搜索名称 / 详细</label>
+            <div className="filter-search">
+              <Input
+                allowClear
+                prefix={<SearchOutlined />}
+                placeholder="如：地铁 / 房租"
+                value={keywordInput}
+                onChange={(e) => setKeywordInput(e.target.value)}
+                onPressEnter={() => {
+                  setKeyword(keywordInput);
+                  setMoreOpen(false);
+                }}
+              />
+              <Button
+                type="primary"
+                className="btn-gradient"
+                onClick={() => {
+                  setKeyword(keywordInput);
+                  setMoreOpen(false);
+                }}
+              >
+                查询
+              </Button>
+            </div>
+            {keyword && (
+              <Button
+                type="link"
+                size="small"
+                style={{ paddingLeft: 0 }}
+                onClick={() => {
+                  setKeywordInput('');
+                  setKeyword('');
+                }}
+              >
+                清除「{keyword}」
+              </Button>
+            )}
+          </div>
+
+          <div className="quick-field">
+            <label>跳到已有月份</label>
+            <Select
+              placeholder="选择一个有记录的月份"
+              value={selectedPeriod && months.includes(selectedPeriod) ? selectedPeriod : undefined}
+              options={monthOptions}
+              onChange={(v) => {
+                setMonth(v ? dayjs(v) : null);
+                setMoreOpen(false);
+              }}
+            />
+          </div>
+
+          <div className="drawer-actions">
+            <Button
+              block
+              onClick={() => {
+                setMonth(dayjs(currentPeriod()));
+                setMoreOpen(false);
+              }}
+            >
+              回到本月
+            </Button>
+            <Button
+              block
+              onClick={() => {
+                setMonth(null);
+                setMoreOpen(false);
+              }}
+            >
+              全部月份
+            </Button>
+            <Button
+              block
+              icon={<ThunderboltOutlined />}
+              onClick={() => {
+                setMoreOpen(false);
+                openBatchModal(null);
+              }}
+            >
+              批量生成
+            </Button>
+            <Button block icon={<ReloadOutlined />} loading={loading} onClick={refreshAll}>
+              刷新
+            </Button>
           </div>
         </div>
       </Drawer>
