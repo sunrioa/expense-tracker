@@ -116,4 +116,21 @@ describe('computeStats', () => {
     expect(new Set(PALETTE).size).toBe(PALETTE.length);
     expect(PALETTE.length).toBeGreaterThanOrEqual(15);
   });
+
+  test('每个配色在白底和近黑底上都读得出来', () => {
+    // WCAG 相对亮度
+    const luminance = (hex: string) => {
+      const ch = (i: number) => {
+        const v = parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) / 255;
+        return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * ch(0) + 0.7152 * ch(1) + 0.0722 * ch(2);
+    };
+    for (const color of PALETTE) {
+      const l = luminance(color);
+      // 太暗在深色模式下会糊进背景，太亮在浅色模式下会飘
+      expect(l).toBeGreaterThan(0.12);
+      expect(l).toBeLessThan(0.6);
+    }
+  });
 });

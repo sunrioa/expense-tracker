@@ -27,13 +27,15 @@ import type { Granularity, PeriodStat, StatsQuery, StatsResponse } from '@ledger
 import { money, periodLabel, sumAmounts, yuan } from '../utils/format';
 import { errMsg } from '../utils/error';
 import { useCountUp } from '../hooks/useCountUp';
+import { useColorScheme } from '../hooks/useColorScheme';
+import { chartTheme } from '../theme/chartTheme';
 
 const { RangePicker } = DatePicker;
 
 type RangePickerProps = ComponentProps<typeof RangePicker>;
 type DateRange = [Dayjs, Dayjs];
 type PieMode = 'category' | 'name';
-type StatTone = 'indigo' | 'emerald' | 'amber' | 'cyan';
+type StatTone = 'teal' | 'sage' | 'amber' | 'cyan';
 
 /**
  * ECharts 回调里的 value 类型很宽（number | string | Date，甚至数组），
@@ -74,7 +76,7 @@ interface StatCardProps {
   icon?: ReactNode;
 }
 
-function StatCard({ label, value, extra, primary, tone = 'indigo', icon }: StatCardProps) {
+function StatCard({ label, value, extra, primary, tone = 'teal', icon }: StatCardProps) {
   return (
     <div className={`stat-card tone-${tone}${primary ? ' primary' : ''}`}>
       <div className="stat-head">
@@ -95,6 +97,10 @@ export default function StatsPage() {
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [pieMode, setPieMode] = useState<PieMode>('category');
+
+  /* ECharts 的 option 是纯 JS 对象，读不到 CSS 变量，配色得单独喂一份 */
+  const scheme = useColorScheme();
+  const ct = useMemo(() => chartTheme(scheme), [scheme]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -150,9 +156,9 @@ export default function StatsPage() {
         type: 'category',
         data: periods.map((p) => p.label),
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: '#e8e8e8' } },
+        axisLine: { lineStyle: { color: ct.axisLine } },
         axisLabel: {
-          color: '#595959',
+          color: ct.axisLabel,
           interval: 0,
           rotate: periods.length > 8 ? 30 : 0,
           fontSize: 11
@@ -160,8 +166,8 @@ export default function StatsPage() {
       },
       yAxis: {
         type: 'value',
-        axisLabel: { color: '#8c8c8c', formatter: (v: number) => `¥${v}` },
-        splitLine: { lineStyle: { color: '#eef1fb' } }
+        axisLabel: { color: ct.axisLabelMuted, formatter: (v: number) => `¥${v}` },
+        splitLine: { lineStyle: { color: ct.splitLine } }
       },
       series: [
         {
@@ -180,9 +186,9 @@ export default function StatsPage() {
               y2: 1,
               global: false,
               colorStops: [
-                { offset: 0, color: '#818cf8' },
-                { offset: 0.55, color: '#6366f1' },
-                { offset: 1, color: '#0891b2' }
+                { offset: 0, color: ct.bar[0] },
+                { offset: 0.55, color: ct.bar[1] },
+                { offset: 1, color: ct.bar[2] }
               ]
             }
           },
@@ -196,8 +202,8 @@ export default function StatsPage() {
                 y2: 1,
                 global: false,
                 colorStops: [
-                  { offset: 0, color: '#a78bfa' },
-                  { offset: 1, color: '#0e7490' }
+                  { offset: 0, color: ct.barHover[0] },
+                  { offset: 1, color: ct.barHover[1] }
                 ]
               }
             }
@@ -205,14 +211,14 @@ export default function StatsPage() {
           label: {
             show: periods.length <= 14,
             position: 'top',
-            color: '#4338ca',
+            color: ct.barLabel,
             fontSize: 10,
             formatter: (p) => money(toNum(p.value))
           }
         }
       ]
     }),
-    [periods]
+    [periods, ct]
   );
 
   /** 累计支出趋势：一眼看出这一年花了多少、什么时候被拉高的 */
@@ -233,13 +239,13 @@ export default function StatsPage() {
         boundaryGap: false,
         data: periods.map((p) => p.label),
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: '#e8e8e8' } },
-        axisLabel: { color: '#595959', fontSize: 11, rotate: periods.length > 8 ? 30 : 0 }
+        axisLine: { lineStyle: { color: ct.axisLine } },
+        axisLabel: { color: ct.axisLabel, fontSize: 11, rotate: periods.length > 8 ? 30 : 0 }
       },
       yAxis: {
         type: 'value',
-        axisLabel: { color: '#8c8c8c', formatter: (v: number) => `¥${v}` },
-        splitLine: { lineStyle: { color: '#eef1fb' } }
+        axisLabel: { color: ct.axisLabelMuted, formatter: (v: number) => `¥${v}` },
+        splitLine: { lineStyle: { color: ct.splitLine } }
       },
       series: [
         {
@@ -248,8 +254,8 @@ export default function StatsPage() {
           smooth: true,
           symbolSize: 6,
           data: values,
-          itemStyle: { color: '#059669', borderColor: '#fff', borderWidth: 1 },
-          lineStyle: { width: 2.5, color: '#10b981' },
+          itemStyle: { color: ct.lineSymbol, borderColor: ct.pieBorder, borderWidth: 1 },
+          lineStyle: { width: 2.5, color: ct.lineStroke },
           areaStyle: {
             color: {
               type: 'linear',
@@ -259,15 +265,15 @@ export default function StatsPage() {
               y2: 1,
               global: false,
               colorStops: [
-                { offset: 0, color: 'rgba(16,185,129,0.30)' },
-                { offset: 1, color: 'rgba(8,145,178,0.04)' }
+                { offset: 0, color: ct.area[0] },
+                { offset: 1, color: ct.area[1] }
               ]
             }
           }
         }
       ]
     };
-  }, [periods]);
+  }, [periods, ct]);
 
   const pieOption = useMemo<EChartsOption>(
     () => ({
@@ -284,7 +290,7 @@ export default function StatsPage() {
         orient: 'vertical',
         right: 4,
         top: 'middle',
-        textStyle: { color: '#595959', fontSize: 12 },
+        textStyle: { color: ct.legendText, fontSize: 12 },
         formatter: (name: string) => (name.length > 10 ? `${name.slice(0, 10)}…` : name)
       },
       series: [
@@ -294,12 +300,12 @@ export default function StatsPage() {
           center: ['36%', '50%'],
           avoidLabelOverlap: true,
           label: { show: false },
-          itemStyle: { borderColor: '#ffffff', borderWidth: 2 },
+          itemStyle: { borderColor: ct.pieBorder, borderWidth: 2 },
           data: pieData
         }
       ]
     }),
-    [pieData]
+    [pieData, ct]
   );
 
   const periodColumns: TableColumnsType<PeriodStat> = [
@@ -329,7 +335,7 @@ export default function StatsPage() {
         <Progress
           percent={Number(v || 0)}
           size="small"
-          strokeColor={{ '0%': '#4f46e5', '100%': '#0891b2' }}
+          strokeColor={{ '0%': ct.progress[0], '100%': ct.progress[1] }}
           format={(p) => `${p}%`}
         />
       )
@@ -382,7 +388,7 @@ export default function StatsPage() {
         <Col xs={24} sm={12} lg={6}>
           <StatCard
             primary
-            tone="indigo"
+            tone="teal"
             icon={<WalletOutlined />}
             label="区间支出合计"
             value={yuan(animatedTotal)}
@@ -395,7 +401,7 @@ export default function StatsPage() {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <StatCard
-            tone="emerald"
+            tone="sage"
             icon={<UnorderedListOutlined />}
             label="明细条数"
             value={Math.round(animatedCount)}
@@ -509,7 +515,7 @@ export default function StatsPage() {
                   <b>合计</b>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={1} align="right">
-                  <b style={{ color: '#4338ca' }}>{yuan(sum)}</b>
+                  <b style={{ color: ct.summaryText }}>{yuan(sum)}</b>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={2}>
                   <Tag color="blue" bordered={false}>

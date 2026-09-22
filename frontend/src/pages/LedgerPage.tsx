@@ -754,7 +754,7 @@ export default function LedgerPage() {
 
   return (
     <div className="page">
-      <Card className="section-card bar-indigo" size="small">
+      <Card className="section-card bar-teal" size="small">
         <div className="hint-block">
           按月记账：每条记录都归属到某个月，金额填这个月该项花的总额即可，不用按天记。
           想拆细就加子项 —— 例如「交通」下面建「单车 / 公交 / 地铁」，各自填这个月的金额，
@@ -815,7 +815,7 @@ export default function LedgerPage() {
         </Row>
       </Card>
 
-      <Card className="section-card bar-teal" size="small">
+      <Card className="section-card bar-sage" size="small">
         <div className="total-strip">
           <span className="total-label">{periodLabel(selectedPeriod)}合计</span>
           <span className="total-number">{yuan(animatedTotal)}</span>
@@ -901,7 +901,7 @@ export default function LedgerPage() {
       </Card>
 
       <Card
-        className="section-card bar-violet"
+        className="section-card bar-clay"
         size="small"
         title="支出明细"
         extra={

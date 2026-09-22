@@ -43,7 +43,7 @@ function Shell() {
       </Content>
 
       <Footer className="app-footer">
-        记账本 · Spring Boot + React + MySQL
+        记账本 · Bun + Hono + React + MySQL
       </Footer>
     </Layout>
   );
