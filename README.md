@@ -341,6 +341,6 @@ CREATE TABLE expense_record (
 
 ## 八、License
 
-[MIT](./LICENSE) © 2026 juran
+[MIT](./LICENSE) © 2026 juranranranran
 
 随意使用、修改、商用，保留版权声明即可。
