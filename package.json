@@ -1,0 +1,13 @@
+{
+  "name": "expense-tracker",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "workspaces": ["packages/*", "server", "frontend"],
+  "scripts": {
+    "server": "bun run --filter @ledger/server dev",
+    "web": "bun run --filter expense-tracker-frontend dev",
+    "test": "bun test",
+    "typecheck": "bun run --filter '*' typecheck"
+  }
+}

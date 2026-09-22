@@ -23,7 +23,9 @@
     "skipLibCheck": true,
 
     /* 打包交给 Vite，tsc 只做类型检查 */
-    "noEmit": true
+    "noEmit": true,
+
+    "paths": { "@ledger/shared": ["../packages/shared/src/index.ts"] }
   },
   "include": ["src", "vite.config.ts"]
 }

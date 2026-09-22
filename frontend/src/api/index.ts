@@ -13,7 +13,7 @@ import type {
   RecordRequest,
   StatsQuery,
   StatsResponse
-} from '../types/api';
+} from '@ledger/shared';
 
 const http: AxiosInstance = axios.create({
   baseURL: '/api',

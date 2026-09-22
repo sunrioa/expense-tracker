@@ -45,9 +45,12 @@ docker compose up -d --build
 
 1. `mysql` 容器拉取 `mysql:8.0` 镜像，创建数据库 `expense_tracker` 和用户 `ledger`，
    并执行 `deploy/mysql/init.sql` 建表（`docker-entrypoint-initdb.d` 机制，**只在数据卷为空时执行一次**）。
-2. `backend` 容器用 `maven:3.9-eclipse-temurin-17` 编译出 jar，再拷进 `eclipse-temurin:17-jre-jammy` 运行。
+2. `server` 容器用 `oven/bun:1-alpine` 直接运行 TypeScript 源码（Bun 原生支持，无需编译步骤），
+   启动时做一次幂等建表 + 老库在线迁移。
    `depends_on: mysql: condition: service_healthy` 保证它等 MySQL 健康检查通过后才启动。
-3. `frontend` 容器用 `oven/bun:1-alpine` 打包 React，把 `dist/` 丢进 nginx，并由 nginx 反向代理 `/api/` 到 `backend:8080`。
+3. `frontend` 容器用 `oven/bun:1-alpine` 打包 React，把 `dist/` 丢进 nginx，并由 nginx 反向代理 `/api/` 到 `server:8080`。
+
+> 两个容器的构建上下文都是**仓库根目录**（不是各自子目录），因为它们都依赖 `packages/shared`。
 
 因为前端和后端走的是**同源**（都从 nginx 的 80 端口出去），所以生产环境不存在跨域问题。
 
@@ -101,11 +104,11 @@ docker compose ps
 
 # 跟踪日志
 docker compose logs -f              # 全部
-docker compose logs -f backend      # 只看后端
+docker compose logs -f server      # 只看后端
 docker compose logs --tail=200 backend
 
 # 重启某个服务
-docker compose restart backend
+docker compose restart server
 
 # 改完代码重新构建启动
 docker compose up -d --build
@@ -182,8 +185,8 @@ docker exec -i ledger-mysql mysql -uroot -p'ledger_root_pwd' expense_tracker < d
 
 ```bash
 docker pull mysql:8.0
-docker pull maven:3.9-eclipse-temurin-17
-docker pull eclipse-temurin:17-jre-alpine
+docker pull oven/bun:1-alpine
+docker pull `oven/bun:1-alpine`
 docker pull oven/bun:1-alpine
 docker pull nginx:1.27-alpine
 ```
@@ -192,20 +195,14 @@ docker pull nginx:1.27-alpine
 > 网络较差时可能到 20 分钟以上，属正常现象，第二次构建有缓存会快很多。
 > 若 `docker.m.daocloud.io` 在你的网络下更快，可只用它一个。
 
-### 2. Maven 下载依赖慢 / 构建超时
+### 2. 依赖下载慢 / 构建超时
 
-`backend/maven-settings.xml` 里已经配好阿里云镜像，Dockerfile 用 `-s` 指定了它。
-如果还是慢，可以换成公司内网 Nexus：
+`server/Dockerfile` 和 `frontend/Dockerfile` 里都用 `BUN_CONFIG_REGISTRY` 写死了
+`registry.npmmirror.com`。要换成内网 registry 就改这个环境变量：
 
-```xml
-<mirror>
-  <id>nexus</id>
-  <url>http://your-nexus/repository/maven-public/</url>
-  <mirrorOf>*</mirrorOf>
-</mirror>
+```dockerfile
+ENV BUN_CONFIG_REGISTRY=http://your-nexus/repository/npm-public/
 ```
-
-前端同理，`frontend/Dockerfile` 里用 `BUN_CONFIG_REGISTRY` 写死了 `registry.npmmirror.com`，可改成内网 registry。
 
 ### 3. 前端依赖安装失败
 
@@ -228,7 +225,7 @@ MySQL 还没就绪。等 30 秒再看，或：
 
 ```bash
 docker compose logs mysql | tail -30
-docker compose restart backend
+docker compose restart server
 ```
 
 如果数据卷是旧版本 MySQL 建的（比如从 5.7 升级），需要重建：
@@ -289,7 +286,8 @@ docker compose down -v && docker compose up -d
           memory: 1g
 ```
 
-后端同理，并把 `.env` 的 `JAVA_OPTS` 调小，例如 `-Xms128m -Xmx384m`。
+后端的 Bun 进程常驻内存通常在 100MB 以内，一般不需要单独限制；
+真要限制就在 compose 里给 `server` 加 `deploy.resources.limits.memory`。
 
 ---
 
@@ -297,15 +295,19 @@ docker compose down -v && docker compose up -d
 
 ### 后端
 
+不需要打包，Bun 直接跑源码：
+
 ```bash
-cd backend && mvn clean package -DskipTests
-java -jar target/expense-tracker-backend.jar \
-  --spring.datasource.url="jdbc:mysql://127.0.0.1:3306/expense_tracker?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai" \
-  --spring.datasource.username=root \
-  --spring.datasource.password=你的密码
+bun install
+DB_HOST=127.0.0.1 DB_PORT=3306 DB_NAME=expense_tracker DB_USER=root DB_PASSWORD=你的密码 \
+  bun run server/src/index.ts
 ```
 
-也可以用环境变量：`DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD`。
+全部可用环境变量：`DB_DRIVER`（mysql / memory）、`DB_HOST`、`DB_PORT`、`DB_NAME`、
+`DB_USER`、`DB_PASSWORD`、`SERVER_PORT`、`TZ`。
+缺哪个都有默认值，值不合法会在**启动时**直接报错，而不是等第一次请求才炸。
+
+用 systemd 常驻的话，`ExecStart` 指向 `bun run /opt/expense-tracker/server/src/index.ts` 即可。
 
 ### 前端
 
@@ -322,6 +324,6 @@ cd frontend && bun run build
 
 - 想换 MySQL 版本：改 `docker-compose.yml` 里 `image: mysql:8.0` → `mysql:8.4`，
   然后 `docker compose down -v && docker compose up -d --build`（换版本必须清数据卷，否则数据目录不兼容）。
-- 想换后端基础镜像：`backend/Dockerfile` 里 `eclipse-temurin:17-jre-jammy` 可换成 `-alpine`（体积更小）。
+- 想换后端基础镜像：`backend/Dockerfile` 里 `oven/bun:1-alpine` 可换成 `-alpine`（体积更小）。
 - 想彻底不用前端容器：直接 `bun run build` 后把 `dist` 挂到宿主机 nginx，
   并删掉 compose 里的 `frontend` 服务。

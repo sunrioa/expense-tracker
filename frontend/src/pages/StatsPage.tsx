@@ -23,8 +23,8 @@ import type { Dayjs } from 'dayjs';
 import type { EChartsOption } from 'echarts';
 import * as api from '../api';
 import Chart from '../components/Chart';
-import type { Granularity, PeriodStat, StatsQuery, StatsResponse } from '../types/api';
-import { money, periodLabel, yuan } from '../utils/format';
+import type { Granularity, PeriodStat, StatsQuery, StatsResponse } from '@ledger/shared';
+import { money, periodLabel, sumAmounts, yuan } from '../utils/format';
 import { errMsg } from '../utils/error';
 import { useCountUp } from '../hooks/useCountUp';
 
@@ -219,8 +219,8 @@ export default function StatsPage() {
   const cumulativeOption = useMemo<EChartsOption>(() => {
     let acc = 0;
     const values = periods.map((p) => {
-      acc += Number(p.total || 0);
-      return Math.round(acc * 100) / 100;
+      acc = sumAmounts([acc, p.total]);
+      return acc;
     });
     return {
       tooltip: {
@@ -502,7 +502,7 @@ export default function StatsPage() {
           locale={{ emptyText: <Empty description="暂无统计数据" /> }}
           summary={() => {
             if (!periods.length) return null;
-            const sum = periods.reduce((s, p) => s + Number(p.total || 0), 0);
+            const sum = sumAmounts(periods.map((p) => p.total));
             return (
               <Table.Summary.Row>
                 <Table.Summary.Cell index={0}>

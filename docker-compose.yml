@@ -29,22 +29,24 @@ services:
     networks:
       - ledger-net
 
-  # ------------------------------------------------------------ 后端 Spring Boot
-  backend:
+  # ------------------------------------------------------------ 后端 Bun + Hono
+  server:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
-    image: expense-tracker-backend:1.0.0
-    container_name: ledger-backend
+      # 构建上下文是仓库根：server 依赖 packages/shared，必须一起进上下文
+      context: .
+      dockerfile: server/Dockerfile
+    image: expense-tracker-server:1.0.0
+    container_name: ledger-server
     restart: unless-stopped
     environment:
+      DB_DRIVER: mysql
       DB_HOST: mysql
       DB_PORT: 3306
       DB_NAME: ${MYSQL_DATABASE:-expense_tracker}
       DB_USER: ${MYSQL_USER:-ledger}
       DB_PASSWORD: ${MYSQL_PASSWORD:-ledger_pwd}
+      SERVER_PORT: 8080
       TZ: Asia/Shanghai
-      JAVA_OPTS: ${JAVA_OPTS:--Xms256m -Xmx512m -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai}
     depends_on:
       mysql:
         condition: service_healthy
@@ -54,15 +56,15 @@ services:
   # ------------------------------------------------------------ 前端 nginx + React 静态资源
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
     image: expense-tracker-frontend:1.0.0
     container_name: ledger-frontend
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-8088}:80"
     depends_on:
-      backend:
+      server:
         condition: service_healthy
     networks:
       - ledger-net

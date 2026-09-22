@@ -1,12 +1,23 @@
-import type { Period } from '../types/api';
+import { roundAmount, sumAmounts, type Period } from '@ledger/shared';
 
-/** 后端 BigDecimal 反序列化过来通常是 number，但留出字符串 / 缺失的余地 */
+/**
+ * 前端展示用的格式化。
+ *
+ * 金额运算和月份规则统一从 @ledger/shared 取 —— 和后端用的是同一份实现，
+ * 不会出现「前端算出来 6839.65、后端算出来 6839.649999」这种事。
+ */
+
 type Numeric = number | string | null | undefined;
 
 /** 树形节点的最小形状，够 walkTree 递归就行 */
 export interface TreeLike<T> {
   children?: T[] | null;
 }
+
+// 当月：和后端 normalizePeriod / currentPeriod 共用同一套定义
+export { currentPeriod } from '@ledger/shared';
+// 精确到分的求和 / 四舍五入，前端也用同一份
+export { roundAmount, sumAmounts };
 
 export const money = (v: Numeric): string => {
   const n = Number(v || 0);
@@ -15,10 +26,12 @@ export const money = (v: Numeric): string => {
 
 export const yuan = (v: Numeric): string => `¥${money(v)}`;
 
-/** 数值四舍五入到 2 位，避免浮点误差 */
-export const round2 = (v: Numeric): number => Math.round((Number(v) || 0) * 100) / 100;
-
-/** 2026-09 → 2026年09月 */
+/**
+ * 2026-09 → 2026年09月。
+ *
+ * 和共享层的 periodLabelCN 差一个语义：这里 null 表示「没有筛选月份」，
+ * 所以给的是「全部月份」而不是「未知月份」。
+ */
 export const periodLabel = (p?: Period | null): string => {
   if (!p) return '全部月份';
   const m = /^(\d{4})-(\d{2})$/.exec(p);
@@ -30,12 +43,6 @@ export const periodShort = (p?: Period | null): string => {
   if (!p) return '';
   const m = /^(\d{4})-(\d{2})$/.exec(p);
   return m ? `${m[2]}月` : p;
-};
-
-/** 当前月份 yyyy-MM */
-export const currentPeriod = (): Period => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
 /** 遍历树，回调每个节点 */
@@ -65,7 +72,7 @@ export function groupIds<T extends TreeLike<T> & { id: number; hasChildren: bool
 
 /** 树的总金额 = 各顶级节点汇总之和 */
 export function treeTotal(nodes: ReadonlyArray<{ subtotal?: Numeric }> | null | undefined): number {
-  return round2((nodes ?? []).reduce((s, n) => s + Number(n.subtotal || 0), 0));
+  return sumAmounts((nodes ?? []).map((n) => n.subtotal ?? 0));
 }
 
 /** 树中叶子节点数量 */

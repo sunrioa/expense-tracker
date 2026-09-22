@@ -40,8 +40,8 @@ import type {
   RecordNode,
   RecordOption,
   RecordPatch
-} from '../types/api';
-import { currentPeriod, money, periodLabel, walkTree, yuan } from '../utils/format';
+} from '@ledger/shared';
+import { currentPeriod, money, periodLabel, sumAmounts, walkTree, yuan } from '../utils/format';
 import { errMsg } from '../utils/error';
 import { useCountUp } from '../hooks/useCountUp';
 
@@ -364,10 +364,8 @@ export default function LedgerPage() {
 
   /* ---------------- 汇总 ---------------- */
 
-  const total = useMemo(
-    () => Math.round((tree || []).reduce((s, n) => s + Number(n.subtotal || 0), 0) * 100) / 100,
-    [tree]
-  );
+  // 用共享层的整数分求和，和后端算出来的数字逐分一致
+  const total = useMemo(() => sumAmounts((tree || []).map((n) => n.subtotal ?? 0)), [tree]);
 
   const leafTotalCount = useMemo(() => {
     let c = 0;
