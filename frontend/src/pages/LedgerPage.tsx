@@ -8,6 +8,7 @@ import {
   Col,
   DatePicker,
   Divider,
+  Drawer,
   Empty,
   Input,
   InputNumber,
@@ -44,6 +45,9 @@ import type {
 import { currentPeriod, money, periodLabel, sumAmounts, walkTree, yuan } from '../utils/format';
 import { errMsg } from '../utils/error';
 import { useCountUp } from '../hooks/useCountUp';
+import { useIsNarrow } from '../hooks/useMediaQuery';
+import RecordCardList from '../components/RecordCardList';
+import RecordEditDrawer from '../components/RecordEditDrawer';
 
 const { MonthPicker } = DatePicker;
 
@@ -101,9 +105,20 @@ interface BatchForm {
   skipExisting: boolean;
 }
 
+/**
+ * 能当父项用的最小形状。
+ * 桌面表格传的是 LedgerRow，手机卡片列表传的是 RecordNode，两者都满足。
+ */
+interface ParentLike {
+  id: number;
+  name: string;
+  period: Period;
+  path?: string;
+}
+
 interface ModalState {
   open: boolean;
-  parent: LedgerRow | null;
+  parent: ParentLike | null;
 }
 
 const EMPTY_ITEM: BatchItemForm = { name: '', detail: '', amount: null };
@@ -310,6 +325,11 @@ export default function LedgerPage() {
 
   const [submitting, setSubmitting] = useState(false);
 
+  /* 手机专用：右下角悬浮按钮唤起的添加抽屉，以及点条目打开的编辑抽屉 */
+  const isNarrow = useIsNarrow();
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [editing, setEditing] = useState<RecordNode | null>(null);
+
   /* ---------------- 数据加载 ---------------- */
 
   const load = useCallback(async () => {
@@ -459,6 +479,7 @@ export default function LedgerPage() {
       });
       message.success('已添加');
       setQuick((q) => ({ ...q, name: '', detail: '', amount: null }));
+      setQuickOpen(false);
       await refreshAll();
     } catch (e) {
       message.error(errMsg(e));
@@ -477,7 +498,7 @@ export default function LedgerPage() {
     }
   };
 
-  const remove = async (row: LedgerRow) => {
+  const remove = async (row: { id: number }) => {
     try {
       const res = await api.deleteRecord(row.id);
       message.success(`已删除 ${res.deleted || 1} 条记录`);
@@ -487,7 +508,7 @@ export default function LedgerPage() {
     }
   };
 
-  const openChildModal = (parent: LedgerRow) => {
+  const openChildModal = (parent: ParentLike) => {
     setChildForm({
       name: '',
       detail: '',
@@ -528,7 +549,7 @@ export default function LedgerPage() {
     }
   };
 
-  const openBatchModal = (parent: LedgerRow | null) => {
+  const openBatchModal = (parent: ParentLike | null) => {
     const base = month || dayjs(currentPeriod());
     setBatchForm({
       parentName: parent ? parent.name : '',
@@ -752,69 +773,135 @@ export default function LedgerPage() {
 
   /* ---------------- 渲染 ---------------- */
 
+  /** 四个输入项。桌面放在卡片里的面板中，手机放在抽屉里，共用同一份 JSX。 */
+  const quickFields = (
+    <div className="quick-grid">
+      <div className="quick-field">
+        <label>归属月份</label>
+        <MonthPicker
+          allowClear={false}
+          format="YYYY-MM"
+          value={quick.period}
+          onChange={(d) => setQuick((q) => ({ ...q, period: d }))}
+        />
+      </div>
+      <div className="quick-field">
+        <label>支出名称</label>
+        <Input
+          placeholder="如：交通 / 吃"
+          value={quick.name}
+          onChange={(e) => setQuick((q) => ({ ...q, name: e.target.value }))}
+          onPressEnter={submitQuick}
+        />
+      </div>
+      <div className="quick-field">
+        <label>支出详细</label>
+        <Input
+          placeholder="这笔钱的说明，如：单车80+公交60"
+          value={quick.detail}
+          onChange={(e) => setQuick((q) => ({ ...q, detail: e.target.value }))}
+          onPressEnter={submitQuick}
+        />
+      </div>
+      <div className="quick-field">
+        <label>支出金额</label>
+        <InputNumber
+          style={{ width: '100%' }}
+          changeOnWheel={false}
+          min={0}
+          precision={2}
+          prefix="¥"
+          placeholder="0.00"
+          value={quick.amount}
+          onChange={(n) => setQuick((q) => ({ ...q, amount: n }))}
+          onPressEnter={submitQuick}
+        />
+      </div>
+    </div>
+  );
+
+  const quickParentPicker = (
+    <Select
+      allowClear
+      showSearch
+      placeholder="归到某个顶级条目下（留空 = 新建顶级条目）"
+      optionFilterProp="label"
+      value={quick.parentId}
+      options={parentOptions}
+      onChange={(v) => setQuick((q) => ({ ...q, parentId: v }))}
+    />
+  );
+
+  const emptyText = selectedPeriod
+    ? `${periodLabel(selectedPeriod)}还没有记录`
+    : '还没有任何记录';
+
   return (
     <div className="page">
+      {/* ---------- 筛选 ---------- */}
       <Card className="section-card bar-teal" size="small">
-        <div className="hint-block">
-          按月记账：每条记录都归属到某个月，金额填这个月该项花的总额即可，不用按天记。
-          想拆细就加子项 —— 例如「交通」下面建「单车 / 公交 / 地铁」，各自填这个月的金额，
-          <b>父项金额由子项自动汇总</b>，顶部合计会实时累加。
-        </div>
+        {/* 这段说明在手机上要占掉三分之一屏，只在桌面显示 */}
+        {!isNarrow && (
+          <div className="hint-block">
+            按月记账：每条记录都归属到某个月，金额填这个月该项花的总额即可，不用按天记。
+            想拆细就加子项 —— 例如「交通」下面建「单车 / 公交 / 地铁」，各自填这个月的金额，
+            <b>父项金额由子项自动汇总</b>，顶部合计会实时累加。
+          </div>
+        )}
 
-        <Row gutter={[12, 12]} align="middle" justify="space-between">
-          <Col>
-            <Space wrap>
-              <MonthPicker
-                value={month}
-                allowClear
-                placeholder="全部月份"
-                format="YYYY-MM"
-                onChange={(d) => setMonth(d || null)}
-              />
-              <Select
-                style={{ width: 150 }}
-                placeholder="跳到已有月份"
-                value={selectedPeriod && months.includes(selectedPeriod) ? selectedPeriod : undefined}
-                options={monthOptions}
-                onChange={(v) => setMonth(v ? dayjs(v) : null)}
-              />
-              <Button onClick={() => setMonth(dayjs(currentPeriod()))}>回到本月</Button>
-              <Input
-                allowClear
-                style={{ width: 190 }}
-                prefix={<SearchOutlined />}
-                placeholder="搜索名称 / 详细"
-                value={keywordInput}
-                onChange={(e) => setKeywordInput(e.target.value)}
-                onPressEnter={() => setKeyword(keywordInput)}
-              />
-              <Button onClick={() => setKeyword(keywordInput)}>查询</Button>
-              {keyword && (
-                <Button
-                  type="link"
-                  onClick={() => {
-                    setKeywordInput('');
-                    setKeyword('');
-                  }}
-                >
-                  清除搜索
-                </Button>
-              )}
-            </Space>
-          </Col>
-          <Col>
-            <Space>
-              <Button icon={<ThunderboltOutlined />} onClick={() => openBatchModal(null)}>
-                按月批量生成
+        <div className="filter-bar">
+          <div className="filter-month">
+            <MonthPicker
+              value={month}
+              allowClear
+              placeholder="全部月份"
+              format="YYYY-MM"
+              onChange={(d) => setMonth(d || null)}
+            />
+            <Select
+              placeholder="跳到已有月份"
+              value={selectedPeriod && months.includes(selectedPeriod) ? selectedPeriod : undefined}
+              options={monthOptions}
+              onChange={(v) => setMonth(v ? dayjs(v) : null)}
+            />
+          </div>
+
+          <div className="filter-search">
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="搜索名称 / 详细"
+              value={keywordInput}
+              onChange={(e) => setKeywordInput(e.target.value)}
+              onPressEnter={() => setKeyword(keywordInput)}
+            />
+            <Button onClick={() => setKeyword(keywordInput)}>查询</Button>
+            {keyword && (
+              <Button
+                type="link"
+                onClick={() => {
+                  setKeywordInput('');
+                  setKeyword('');
+                }}
+              >
+                清除
               </Button>
-              <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={loading}>
-                刷新
-              </Button>
-            </Space>
-          </Col>
-        </Row>
+            )}
+          </div>
+
+          <div className="filter-actions">
+            <Button onClick={() => setMonth(dayjs(currentPeriod()))}>回到本月</Button>
+            <Button icon={<ThunderboltOutlined />} onClick={() => openBatchModal(null)}>
+              批量生成
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={loading}>
+              刷新
+            </Button>
+          </div>
+        </div>
       </Card>
 
+      {/* ---------- 合计（手机上这是第一屏最重要的数字） ---------- */}
       <Card className="section-card bar-sage" size="small">
         <div className="total-strip">
           <span className="total-label">{periodLabel(selectedPeriod)}合计</span>
@@ -824,68 +911,103 @@ export default function LedgerPage() {
           </span>
         </div>
 
-        <Divider className="soft-divider" />
+        {/* 手机上这块常驻会占掉约 400px，改由右下角悬浮按钮唤起抽屉 */}
+        {!isNarrow && (
+          <>
+            <Divider className="soft-divider" />
+            <div className="quick-panel">
+              <div className="panel-title">
+                <PlusCircleOutlined className="panel-icon" />
+                快速添加一条记录
+              </div>
+              {quickFields}
+              <div className="quick-actions">
+                <div className="quick-parent">{quickParentPicker}</div>
+                <Button
+                  type="primary"
+                  className="btn-gradient"
+                  icon={<PlusOutlined />}
+                  loading={submitting}
+                  onClick={submitQuick}
+                >
+                  添加记录
+                </Button>
+                <span className="quick-hint">子项只支持一层：顶级条目 → 子项</span>
+              </div>
+            </div>
+          </>
+        )}
+      </Card>
 
-        <div className="quick-panel">
-          <div className="panel-title">
-            <PlusCircleOutlined className="panel-icon" />
-            快速添加一条记录
-          </div>
-          <div className="quick-grid">
-            <div className="quick-field">
-              <label>归属月份</label>
-              <MonthPicker
-                allowClear={false}
-                format="YYYY-MM"
-                value={quick.period}
-                onChange={(d) => setQuick((q) => ({ ...q, period: d }))}
-              />
-            </div>
-            <div className="quick-field">
-              <label>支出名称</label>
-              <Input
-                placeholder="如：交通 / 吃"
-                value={quick.name}
-                onChange={(e) => setQuick((q) => ({ ...q, name: e.target.value }))}
-                onPressEnter={submitQuick}
-              />
-            </div>
-            <div className="quick-field">
-              <label>支出详细</label>
-              <Input
-                placeholder="这笔钱的说明，如：单车80+公交60"
-                value={quick.detail}
-                onChange={(e) => setQuick((q) => ({ ...q, detail: e.target.value }))}
-                onPressEnter={submitQuick}
-              />
-            </div>
-            <div className="quick-field">
-              <label>支出金额</label>
-              <InputNumber
-                style={{ width: '100%' }}
-                changeOnWheel={false}
-                min={0}
-                precision={2}
-                prefix="¥"
-                placeholder="0.00"
-                value={quick.amount}
-                onChange={(n) => setQuick((q) => ({ ...q, amount: n }))}
-                onPressEnter={submitQuick}
-              />
-            </div>
-          </div>
+      {/* ---------- 明细 ---------- */}
+      <Card
+        className="section-card bar-clay"
+        size="small"
+        title="支出明细"
+        extra={
+          !isNarrow && (
+            <span className="table-legend">
+              <span className="legend-item">
+                <i className="legend-dot dot-parent" />
+                顶级条目（金额由子项汇总）
+              </span>
+              <span className="legend-item">
+                <i className="legend-dot dot-leaf" />
+                明细项（可直接编辑）
+              </span>
+            </span>
+          )
+        }
+      >
+        {isNarrow ? (
+          <RecordCardList
+            tree={tree}
+            collapsed={collapsed}
+            onToggle={toggleCollapse}
+            onPick={setEditing}
+            onAddChild={openChildModal}
+            loading={loading}
+            emptyText={emptyText}
+          />
+        ) : (
+          <Table<LedgerRow>
+            className="ledger-table"
+            rowKey="id"
+            size="small"
+            loading={loading}
+            columns={columns}
+            dataSource={rows}
+            scroll={{ x: 720 }}
+            pagination={false}
+            rowClassName={(row) => (row.depth === 0 ? 'top-row' : 'child-row')}
+            locale={{ emptyText: <Empty description={emptyText} /> }}
+          />
+        )}
+      </Card>
 
-          <div className="quick-actions">
-            <Select
-              allowClear
-              showSearch
-              style={{ minWidth: 290 }}
-              placeholder="归到某个顶级条目下（留空 = 新建顶级条目）"
-              optionFilterProp="label"
-              value={quick.parentId}
-              options={parentOptions}
-              onChange={(v) => setQuick((q) => ({ ...q, parentId: v }))}
-            />
+      {/* ---------- 手机：悬浮添加按钮 ---------- */}
+      {isNarrow && (
+        <button
+          type="button"
+          className="fab"
+          aria-label="添加一条记录"
+          onClick={() => setQuickOpen(true)}
+        >
+          <PlusOutlined />
+        </button>
+      )}
+
+      {/* ---------- 手机：添加抽屉 ---------- */}
+      <Drawer
+        open={isNarrow && quickOpen}
+        onClose={() => setQuickOpen(false)}
+        placement="bottom"
+        height="auto"
+        title="添加一条记录"
+        className="edit-drawer"
+        footer={
+          <div className="drawer-footer">
+            <Button onClick={() => setQuickOpen(false)}>取消</Button>
             <Button
               type="primary"
               className="btn-gradient"
@@ -895,54 +1017,42 @@ export default function LedgerPage() {
             >
               添加记录
             </Button>
-            <span className="quick-hint">子项只支持一层：顶级条目 → 子项</span>
           </div>
-        </div>
-      </Card>
-
-      <Card
-        className="section-card bar-clay"
-        size="small"
-        title="支出明细"
-        extra={
-          <span className="table-legend">
-            <span className="legend-item">
-              <i className="legend-dot dot-parent" />
-              顶级条目（金额由子项汇总）
-            </span>
-            <span className="legend-item">
-              <i className="legend-dot dot-leaf" />
-              明细项（可直接编辑）
-            </span>
-          </span>
         }
       >
-        <Table<LedgerRow>
-          className="ledger-table"
-          rowKey="id"
-          size="small"
-          loading={loading}
-          columns={columns}
-          dataSource={rows}
-          /* 六列可编辑表格在手机上塞不下，横向滚动，不要把列压到没法读 */
-          scroll={{ x: 720 }}
-          pagination={false}
-          rowClassName={(row) => (row.depth === 0 ? 'top-row' : 'child-row')}
-          locale={{
-            emptyText: (
-              <Empty
-                description={
-                  selectedPeriod ? `${periodLabel(selectedPeriod)}还没有记录` : '还没有任何记录'
-                }
-              />
-            )
-          }}
-        />
-      </Card>
+        <div className="drawer-form">
+          {quickFields}
+          <div className="quick-field">
+            <label>归到哪个顶级条目下</label>
+            {quickParentPicker}
+            <span className="field-hint">留空 = 新建一个顶级条目。子项只支持一层</span>
+          </div>
+        </div>
+      </Drawer>
 
-      {/* 添加子项 */}
+      {/* ---------- 手机：编辑抽屉 ---------- */}
+      <RecordEditDrawer
+        open={isNarrow && editing !== null}
+        record={editing}
+        submitting={submitting}
+        onClose={() => setEditing(null)}
+        onSave={async (id, changes) => {
+          await patch(id, changes);
+          setEditing(null);
+        }}
+        onDelete={async (r) => {
+          await remove(r);
+          setEditing(null);
+        }}
+      />
+
+      {/* ---------- 添加子项 ---------- */}
       <Modal
-        title={childModal.parent ? `在「${childModal.parent.path || childModal.parent.name}」下添加子项` : '添加子项'}
+        title={
+          childModal.parent
+            ? `在「${childModal.parent.path || childModal.parent.name}」下添加子项`
+            : '添加子项'
+        }
         open={childModal.open}
         onCancel={() => setChildModal({ open: false, parent: null })}
         onOk={submitChild}
@@ -999,7 +1109,7 @@ export default function LedgerPage() {
         </div>
       </Modal>
 
-      {/* 按月批量生成 */}
+      {/* ---------- 按月批量生成 ---------- */}
       <Modal
         title={batchModal.parent ? `按月批量生成到「${batchModal.parent.name}」` : '按月批量生成'}
         open={batchModal.open}
@@ -1083,7 +1193,7 @@ export default function LedgerPage() {
         <Divider />
 
         <Row gutter={[12, 12]}>
-          <Col span={10}>
+          <Col xs={12} sm={10}>
             <div className="quick-field">
               <label>起始月份</label>
               <MonthPicker
@@ -1095,7 +1205,7 @@ export default function LedgerPage() {
               />
             </div>
           </Col>
-          <Col span={10}>
+          <Col xs={12} sm={10}>
             <div className="quick-field">
               <label>结束月份</label>
               <MonthPicker
@@ -1107,13 +1217,17 @@ export default function LedgerPage() {
               />
             </div>
           </Col>
-          <Col span={4}>
+          <Col xs={24} sm={4}>
             <div className="quick-field">
-              <label>&nbsp;</label>
+              <label className="label-spacer">&nbsp;</label>
               <Button
                 block
                 onClick={() =>
-                  setBatchForm((f) => ({ ...f, from: dayjs(currentPeriod()), to: dayjs(currentPeriod()) }))
+                  setBatchForm((f) => ({
+                    ...f,
+                    from: dayjs(currentPeriod()),
+                    to: dayjs(currentPeriod())
+                  }))
                 }
               >
                 本月

@@ -24,10 +24,11 @@ import type { EChartsOption } from 'echarts';
 import * as api from '../api';
 import Chart from '../components/Chart';
 import type { Granularity, PeriodStat, StatsQuery, StatsResponse } from '@ledger/shared';
-import { money, periodLabel, sumAmounts, yuan } from '../utils/format';
+import { money, periodLabel, periodShort, sumAmounts, yuan } from '../utils/format';
 import { errMsg } from '../utils/error';
 import { useCountUp } from '../hooks/useCountUp';
 import { useColorScheme } from '../hooks/useColorScheme';
+import { useIsNarrow } from '../hooks/useMediaQuery';
 import { chartTheme } from '../theme/chartTheme';
 
 const { RangePicker } = DatePicker;
@@ -101,6 +102,9 @@ export default function StatsPage() {
   /* ECharts 的 option 是纯 JS 对象，读不到 CSS 变量，配色得单独喂一份 */
   const scheme = useColorScheme();
   const ct = useMemo(() => chartTheme(scheme), [scheme]);
+  const isNarrow = useIsNarrow();
+  /* 手机上图表矮一些，否则一屏只装得下一张图 */
+  const chartHeight = isNarrow ? 220 : 300;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -139,6 +143,15 @@ export default function StatsPage() {
 
   const hasData = !!data && data.recordCount > 0;
 
+  /**
+   * X 轴标签。窄屏用短标签 —— 「2026年01月」9 个字在 390px 宽里即使斜排也会互相压住，
+   * 「01月」则不用旋转就排得下。按年统计时 key 本身就是「2026」，直接用。
+   */
+  const axisLabels = useMemo(
+    () => periods.map((p) => (isNarrow ? (isYear ? p.key : periodShort(p.key)) : p.label)),
+    [periods, isNarrow, isYear]
+  );
+
   /* 三个关键指标做数字滚动。hook 必须无条件调用，所以 data 为 null 时传 0 */
   const animatedTotal = useCountUp(data?.total ?? 0);
   const animatedCount = useCountUp(data?.recordCount ?? 0);
@@ -154,14 +167,14 @@ export default function StatsPage() {
       grid: { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
       xAxis: {
         type: 'category',
-        data: periods.map((p) => p.label),
+        data: axisLabels,
         axisTick: { show: false },
         axisLine: { lineStyle: { color: ct.axisLine } },
         axisLabel: {
           color: ct.axisLabel,
           interval: 0,
-          rotate: periods.length > 8 ? 30 : 0,
-          fontSize: 11
+          rotate: isNarrow ? 0 : periods.length > 8 ? 30 : 0,
+          fontSize: isNarrow ? 10 : 11
         }
       },
       yAxis: {
@@ -209,7 +222,7 @@ export default function StatsPage() {
             }
           },
           label: {
-            show: periods.length <= 14,
+            show: !isNarrow && periods.length <= 14,
             position: 'top',
             color: ct.barLabel,
             fontSize: 10,
@@ -218,7 +231,7 @@ export default function StatsPage() {
         }
       ]
     }),
-    [periods, ct]
+    [periods, axisLabels, isNarrow, ct]
   );
 
   /** 累计支出趋势：一眼看出这一年花了多少、什么时候被拉高的 */
@@ -237,10 +250,14 @@ export default function StatsPage() {
       xAxis: {
         type: 'category',
         boundaryGap: false,
-        data: periods.map((p) => p.label),
+        data: axisLabels,
         axisTick: { show: false },
         axisLine: { lineStyle: { color: ct.axisLine } },
-        axisLabel: { color: ct.axisLabel, fontSize: 11, rotate: periods.length > 8 ? 30 : 0 }
+        axisLabel: {
+          color: ct.axisLabel,
+          fontSize: isNarrow ? 10 : 11,
+          rotate: isNarrow ? 0 : periods.length > 8 ? 30 : 0
+        }
       },
       yAxis: {
         type: 'value',
@@ -273,7 +290,7 @@ export default function StatsPage() {
         }
       ]
     };
-  }, [periods, ct]);
+  }, [periods, axisLabels, isNarrow, ct]);
 
   const pieOption = useMemo<EChartsOption>(
     () => ({
@@ -287,9 +304,9 @@ export default function StatsPage() {
       },
       legend: {
         type: 'scroll',
-        orient: 'vertical',
-        right: 4,
-        top: 'middle',
+        // 窄屏图例放底部横排：竖排图例会把饼图挤成一条
+        orient: isNarrow ? 'horizontal' : 'vertical',
+        ...(isNarrow ? { bottom: 0, left: 'center' } : { right: 4, top: 'middle' }),
         textStyle: { color: ct.legendText, fontSize: 12 },
         formatter: (name: string) => (name.length > 10 ? `${name.slice(0, 10)}…` : name)
       },
@@ -297,7 +314,7 @@ export default function StatsPage() {
         {
           type: 'pie',
           radius: ['46%', '72%'],
-          center: ['36%', '50%'],
+          center: isNarrow ? ['50%', '42%'] : ['36%', '50%'],
           avoidLabelOverlap: true,
           label: { show: false },
           itemStyle: { borderColor: ct.pieBorder, borderWidth: 2 },
@@ -305,32 +322,37 @@ export default function StatsPage() {
         }
       ]
     }),
-    [pieData, ct]
+    [pieData, isNarrow, ct]
   );
 
   const periodColumns: TableColumnsType<PeriodStat> = [
     {
       title: isYear ? '年份' : '月份',
       dataIndex: 'label',
-      render: (v: string, row: PeriodStat) => (
-        <Space size={6}>
-          <span>{v}</span>
-          {!isYear && row.key && <span className="muted">{row.key}</span>}
-        </Space>
-      )
+      width: isNarrow ? 92 : undefined,
+      // 手机上用原始值「2026-01」：中文标签「2026年01月」在窄列里会竖排折成两行
+      render: (v: string, row: PeriodStat) =>
+        isNarrow ? (
+          <span>{row.key}</span>
+        ) : (
+          <Space size={6}>
+            <span>{v}</span>
+            {!isYear && row.key && <span className="muted">{row.key}</span>}
+          </Space>
+        )
     },
     {
       title: '支出金额',
       dataIndex: 'total',
       align: 'right',
-      width: 160,
+      width: isNarrow ? 110 : 160,
       sorter: (a, b) => Number(a.total) - Number(b.total),
       render: (v: number) => <b>{yuan(v)}</b>
     },
     {
       title: '占比',
       dataIndex: 'percent',
-      width: 220,
+      width: isNarrow ? 120 : 220,
       render: (v: number) => (
         <Progress
           percent={Number(v || 0)}
@@ -340,21 +362,26 @@ export default function StatsPage() {
         />
       )
     },
-    {
-      title: '明细条数',
-      dataIndex: 'count',
-      align: 'right',
-      width: 100,
-      render: (v: number) => <span>{v} 条</span>
-    }
+    // 明细条数在手机上是可以牺牲的信息，让出宽度给金额和占比
+    ...(isNarrow
+      ? []
+      : [
+          {
+            title: '明细条数',
+            dataIndex: 'count',
+            align: 'right' as const,
+            width: 100,
+            render: (v: number) => <span>{v} 条</span>
+          }
+        ])
   ];
 
   return (
     <div className="page">
       <Card className="section-card" size="small">
-        <Row gutter={[12, 12]} align="middle" justify="space-between">
+        <Row gutter={[12, 12]} align="middle" justify="space-between" className="stats-bar">
           <Col>
-            <Space wrap>
+            <Space wrap className="stats-range">
               <Segmented<Granularity>
                 value={granularity}
                 onChange={setGranularity}
@@ -385,7 +412,7 @@ export default function StatsPage() {
       </Card>
 
       <Row gutter={[12, 12]} className="stat-row">
-        <Col xs={24} sm={12} lg={6}>
+        <Col xs={12} sm={12} lg={6}>
           <StatCard
             primary
             tone="teal"
@@ -399,7 +426,7 @@ export default function StatsPage() {
             }
           />
         </Col>
-        <Col xs={24} sm={12} lg={6}>
+        <Col xs={12} sm={12} lg={6}>
           <StatCard
             tone="sage"
             icon={<UnorderedListOutlined />}
@@ -408,7 +435,7 @@ export default function StatsPage() {
             extra={data ? `覆盖 ${data.monthCount} 个月 · 平均每月 ${yuan(data.avgPerMonth)}` : '—'}
           />
         </Col>
-        <Col xs={24} sm={12} lg={6}>
+        <Col xs={12} sm={12} lg={6}>
           <StatCard
             tone="amber"
             icon={<RiseOutlined />}
@@ -421,7 +448,7 @@ export default function StatsPage() {
             }
           />
         </Col>
-        <Col xs={24} sm={12} lg={6}>
+        <Col xs={12} sm={12} lg={6}>
           <StatCard
             tone="cyan"
             icon={<TagsOutlined />}
@@ -443,9 +470,9 @@ export default function StatsPage() {
         }
       >
         {hasData ? (
-          <Chart option={barOption} height={300} />
+          <Chart option={barOption} height={chartHeight} />
         ) : (
-          <Chart empty height={300} emptyText="所选区间内暂无支出记录" />
+          <Chart empty height={chartHeight} emptyText="所选区间内暂无支出记录" />
         )}
       </Card>
 
@@ -458,9 +485,9 @@ export default function StatsPage() {
             extra={<span className="muted">看进度，判断后面还能花多少</span>}
           >
             {hasData ? (
-              <Chart option={cumulativeOption} height={300} />
+              <Chart option={cumulativeOption} height={chartHeight} />
             ) : (
-              <Chart empty height={300} emptyText="暂无数据" />
+              <Chart empty height={chartHeight} emptyText="暂无数据" />
             )}
           </Card>
         </Col>
@@ -484,9 +511,9 @@ export default function StatsPage() {
             }
           >
             {hasData && pieData.length ? (
-              <Chart option={pieOption} height={300} />
+              <Chart option={pieOption} height={isNarrow ? 280 : chartHeight} />
             ) : (
-              <Chart empty height={300} emptyText="暂无数据" />
+              <Chart empty height={isNarrow ? 280 : chartHeight} emptyText="暂无数据" />
             )}
           </Card>
         </Col>
@@ -503,30 +530,33 @@ export default function StatsPage() {
           loading={loading}
           dataSource={periods}
           columns={periodColumns}
-          scroll={{ x: 560 }}
+          scroll={{ x: isNarrow ? 340 : 560 }}
           pagination={periods.length > 12 ? { pageSize: 12, size: 'small' } : false}
           locale={{ emptyText: <Empty description="暂无统计数据" /> }}
           summary={() => {
             if (!periods.length) return null;
             const sum = sumAmounts(periods.map((p) => p.total));
+            const count = periods.reduce((s, p) => s + Number(p.count || 0), 0);
             return (
               <Table.Summary.Row>
                 <Table.Summary.Cell index={0}>
                   <b>合计</b>
+                  {/* 窄屏没有「明细条数」列，把条数并进合计单元格，别让它挤出表格 */}
+                  {isNarrow && <span className="muted"> · {count} 条</span>}
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={1} align="right">
                   <b style={{ color: ct.summaryText }}>{yuan(sum)}</b>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={2}>
-                  <Tag bordered={false}>
-                    100%
-                  </Tag>
+                  <Tag bordered={false}>100%</Tag>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={3} align="right">
-                  <Tooltip title="区间内所有明细条数">
-                    <span>{periods.reduce((s, p) => s + Number(p.count || 0), 0)} 条</span>
-                  </Tooltip>
-                </Table.Summary.Cell>
+                {!isNarrow && (
+                  <Table.Summary.Cell index={3} align="right">
+                    <Tooltip title="区间内所有明细条数">
+                      <span>{count} 条</span>
+                    </Tooltip>
+                  </Table.Summary.Cell>
+                )}
               </Table.Summary.Row>
             );
           }}

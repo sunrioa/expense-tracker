@@ -1,13 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useMediaQuery } from './useMediaQuery';
 
 export type ColorScheme = 'light' | 'dark';
-
-const QUERY = '(prefers-color-scheme: dark)';
-
-function read(): ColorScheme {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'light';
-  return window.matchMedia(QUERY).matches ? 'dark' : 'light';
-}
 
 /**
  * 跟随系统的浅色 / 深色。
@@ -17,15 +10,5 @@ function read(): ColorScheme {
  * 系统设置一改，这里会立刻重渲染，三者保持同步。
  */
 export function useColorScheme(): ColorScheme {
-  const [scheme, setScheme] = useState<ColorScheme>(read);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
-    const mq = window.matchMedia(QUERY);
-    const onChange = (e: MediaQueryListEvent) => setScheme(e.matches ? 'dark' : 'light');
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-
-  return scheme;
+  return useMediaQuery('(prefers-color-scheme: dark)') ? 'dark' : 'light';
 }
