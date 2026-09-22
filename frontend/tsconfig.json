@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+
+    /* 一次到位开 strict —— 半开的 strict 会给人虚假的安全感 */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+
+    /* 第三方库的 d.ts 不参与检查，antd / echarts 体积大，跳过省一半时间 */
+    "skipLibCheck": true,
+
+    /* 打包交给 Vite，tsc 只做类型检查 */
+    "noEmit": true
+  },
+  "include": ["src", "vite.config.ts"]
+}

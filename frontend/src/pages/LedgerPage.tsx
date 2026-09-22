@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
   App as AntApp,
   Button,
@@ -19,6 +20,7 @@ import {
   Tag,
   Tooltip
 } from 'antd';
+import type { TableColumnsType } from 'antd';
 import {
   DeleteOutlined,
   PlusCircleOutlined,
@@ -28,16 +30,96 @@ import {
   ThunderboltOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import * as api from '../api';
+import type {
+  BatchFillItem,
+  OptionsQuery,
+  Period,
+  RangeQuery,
+  RecordNode,
+  RecordOption,
+  RecordPatch
+} from '../types/api';
 import { currentPeriod, money, periodLabel, walkTree, yuan } from '../utils/format';
+import { errMsg } from '../utils/error';
+import { useCountUp } from '../hooks/useCountUp';
 
 const { MonthPicker } = DatePicker;
 
-const EMPTY_ITEM = { name: '', detail: '', amount: null };
+/* ------------------------------------------------------------ 本页类型 */
+
+/**
+ * 表格行：把 RecordNode 树摊平后的一行。
+ *
+ * 刻意**不**保留 children —— rc-table 只要在 record 上看到 children 就会把它
+ * 当成树形数据，把展开图标塞进第一列，破坏列布局。这个约束原来只写在注释里，
+ * 现在由类型本身表达：LedgerRow 根本没有 children 字段。
+ */
+interface LedgerRow {
+  id: number;
+  name: string;
+  detail?: string;
+  amount?: number;
+  subtotal?: number;
+  period: Period;
+  path?: string;
+  depth: number;
+  hasChildren: boolean;
+  childCount: number;
+  childNames: string[];
+  expanded: boolean;
+}
+
+interface QuickForm {
+  period: Dayjs | null;
+  name: string;
+  detail: string;
+  amount: number | null;
+  parentId?: number;
+}
+
+interface ChildForm {
+  name: string;
+  detail: string;
+  amount: number | null;
+  period: Dayjs | null;
+}
+
+interface BatchItemForm {
+  name: string;
+  detail: string;
+  amount: number | null;
+}
+
+interface BatchForm {
+  parentName: string;
+  items: BatchItemForm[];
+  from: Dayjs | null;
+  to: Dayjs | null;
+  detailTemplate: string;
+  skipExisting: boolean;
+}
+
+interface ModalState {
+  open: boolean;
+  parent: LedgerRow | null;
+}
+
+const EMPTY_ITEM: BatchItemForm = { name: '', detail: '', amount: null };
 
 /* ------------------------------------------------------------ 可编辑单元格 */
 
-function TextCell({ value, onCommit, placeholder, className, disabled, allowEmpty }) {
+interface TextCellProps {
+  value?: string;
+  onCommit: (value: string) => void;
+  placeholder?: string;
+  className?: string;
+  disabled?: boolean;
+  allowEmpty?: boolean;
+}
+
+function TextCell({ value, onCommit, placeholder, className, disabled, allowEmpty }: TextCellProps) {
   const [v, setV] = useState(value || '');
   const [focused, setFocused] = useState(false);
 
@@ -74,6 +156,15 @@ function TextCell({ value, onCommit, placeholder, className, disabled, allowEmpt
   );
 }
 
+interface AmountCellProps {
+  value?: number | null;
+  parentLike?: boolean;
+  /** 只读时不会调用 onCommit，所以 onCommit 可以不传 */
+  readOnly?: boolean;
+  onCommit?: (value: number) => void;
+  tooltip?: ReactNode;
+}
+
 /**
  * 金额单元格。
  *
@@ -84,10 +175,10 @@ function TextCell({ value, onCommit, placeholder, className, disabled, allowEmpt
  * </ul>
  * 除「有子项的父项」（金额由子项汇总，只读）外，点击数字即可就地修改。
  */
-function AmountCell({ value, parentLike, readOnly, onCommit, tooltip }) {
+function AmountCell({ value, parentLike, readOnly, onCommit, tooltip }: AmountCellProps) {
   const num = value === null || value === undefined ? 0 : Number(value);
   const [editing, setEditing] = useState(false);
-  const [v, setV] = useState(num);
+  const [v, setV] = useState<number | null>(num);
 
   useEffect(() => {
     if (!editing) setV(num);
@@ -134,16 +225,23 @@ function AmountCell({ value, parentLike, readOnly, onCommit, tooltip }) {
       }}
       onBlur={() => {
         setEditing(false);
-        const next = v === null || v === undefined || v === '' ? 0 : Number(v);
-        if (next !== num) onCommit(next);
+        // 原来还判了 v === ''：InputNumber 的 onChange 只会给出 number | null，
+        // 空字符串这个分支永远进不去，类型收紧后直接去掉。
+        const next = v === null || v === undefined ? 0 : Number(v);
+        if (next !== num) onCommit?.(next);
       }}
       onPressEnter={(e) => e.currentTarget.blur()}
     />
   );
 }
 
-function PeriodCell({ value, onCommit }) {
-  const [v, setV] = useState(value ? dayjs(value) : null);
+interface PeriodCellProps {
+  value?: Period;
+  onCommit: (value: Period) => void;
+}
+
+function PeriodCell({ value, onCommit }: PeriodCellProps) {
+  const [v, setV] = useState<Dayjs | null>(value ? dayjs(value) : null);
 
   useEffect(() => {
     setV(value ? dayjs(value) : null);
@@ -173,18 +271,18 @@ export default function LedgerPage() {
   const { message, modal } = AntApp.useApp();
 
   /** null = 查看全部月份 */
-  const [month, setMonth] = useState(() => dayjs(currentPeriod()));
-  const [months, setMonths] = useState([]);
+  const [month, setMonth] = useState<Dayjs | null>(() => dayjs(currentPeriod()));
+  const [months, setMonths] = useState<Period[]>([]);
   const [keywordInput, setKeywordInput] = useState('');
   const [keyword, setKeyword] = useState('');
-  const [tree, setTree] = useState([]);
+  const [tree, setTree] = useState<RecordNode[]>([]);
   const [loading, setLoading] = useState(false);
-  const [options, setOptions] = useState([]);
-  const [collapsed, setCollapsed] = useState(() => new Set());
+  const [options, setOptions] = useState<RecordOption[]>([]);
+  const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
 
   const selectedPeriod = month ? month.format('YYYY-MM') : null;
 
-  const [quick, setQuick] = useState({
+  const [quick, setQuick] = useState<QuickForm>({
     period: dayjs(currentPeriod()),
     name: '',
     detail: '',
@@ -192,16 +290,16 @@ export default function LedgerPage() {
     parentId: undefined
   });
 
-  const [childModal, setChildModal] = useState({ open: false, parent: null });
-  const [childForm, setChildForm] = useState({
+  const [childModal, setChildModal] = useState<ModalState>({ open: false, parent: null });
+  const [childForm, setChildForm] = useState<ChildForm>({
     name: '',
     detail: '',
     amount: null,
     period: dayjs(currentPeriod())
   });
 
-  const [batchModal, setBatchModal] = useState({ open: false, parent: null });
-  const [batchForm, setBatchForm] = useState({
+  const [batchModal, setBatchModal] = useState<ModalState>({ open: false, parent: null });
+  const [batchForm, setBatchForm] = useState<BatchForm>({
     parentName: '',
     items: [{ ...EMPTY_ITEM }],
     from: dayjs(currentPeriod()),
@@ -217,7 +315,7 @@ export default function LedgerPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = {};
+      const params: RangeQuery = {};
       if (selectedPeriod) {
         params.from = selectedPeriod;
         params.to = selectedPeriod;
@@ -226,7 +324,7 @@ export default function LedgerPage() {
       const data = await api.fetchTree(params);
       setTree(Array.isArray(data) ? data : []);
     } catch (e) {
-      message.error(e.message);
+      message.error(errMsg(e));
       setTree([]);
     } finally {
       setLoading(false);
@@ -235,10 +333,10 @@ export default function LedgerPage() {
 
   const loadOptions = useCallback(async () => {
     try {
-      const params = selectedPeriod ? { period: selectedPeriod } : {};
+      const params: OptionsQuery = selectedPeriod ? { period: selectedPeriod } : {};
       const data = await api.fetchOptions(params);
       setOptions(Array.isArray(data) ? data : []);
-    } catch (e) {
+    } catch {
       /* 下拉选项失败不影响主流程 */
     }
   }, [selectedPeriod]);
@@ -247,7 +345,7 @@ export default function LedgerPage() {
     try {
       const data = await api.fetchPeriods();
       setMonths(Array.isArray(data) ? data : []);
-    } catch (e) {
+    } catch {
       /* ignore */
     }
   }, []);
@@ -297,10 +395,10 @@ export default function LedgerPage() {
    * 单元格里，和可编辑输入框抢宽度、导致换行错位。这里自己维护缩进与展开，
    * 表格每列都是干净的独立单元格。
    */
-  const rows = useMemo(() => {
-    const out = [];
-    const walk = (nodes) => {
-      (nodes || []).forEach((n) => {
+  const rows = useMemo<LedgerRow[]>(() => {
+    const out: LedgerRow[] = [];
+    const walk = (nodes: RecordNode[] | undefined) => {
+      (nodes ?? []).forEach((n) => {
         const hasChildren = !!(n.children && n.children.length);
         const expanded = hasChildren && !collapsed.has(n.id);
         out.push({
@@ -314,8 +412,6 @@ export default function LedgerPage() {
           depth: n.depth || 0,
           hasChildren,
           childCount: hasChildren ? n.children.length : 0,
-          // 注意：这里刻意不保留 children 字段。rc-table 只要在 record 上看到
-          // children 就会把它当成树形数据，把展开图标塞进第一列，破坏列布局。
           childNames: hasChildren ? n.children.map((c) => c.name).filter(Boolean) : [],
           expanded
         });
@@ -326,7 +422,7 @@ export default function LedgerPage() {
     return out;
   }, [tree, collapsed]);
 
-  const toggleCollapse = useCallback((id) => {
+  const toggleCollapse = useCallback((id: number) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -349,7 +445,8 @@ export default function LedgerPage() {
       message.warning('请填写支出名称');
       return;
     }
-    if (quick.amount === null || quick.amount === undefined || quick.amount === '') {
+    // 同 AmountCell：InputNumber 不会给出空字符串，原来的 amount === '' 分支已去掉
+    if (quick.amount === null || quick.amount === undefined) {
       message.warning('请填写支出金额');
       return;
     }
@@ -366,33 +463,33 @@ export default function LedgerPage() {
       setQuick((q) => ({ ...q, name: '', detail: '', amount: null }));
       await refreshAll();
     } catch (e) {
-      message.error(e.message);
+      message.error(errMsg(e));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const patch = async (id, changes) => {
+  const patch = async (id: number, changes: RecordPatch) => {
     try {
       await api.updateRecord(id, changes);
       await refreshAll();
     } catch (e) {
-      message.error(e.message);
+      message.error(errMsg(e));
       load();
     }
   };
 
-  const remove = async (row) => {
+  const remove = async (row: LedgerRow) => {
     try {
       const res = await api.deleteRecord(row.id);
-      message.success(`已删除 ${res && res.deleted ? res.deleted : 1} 条记录`);
+      message.success(`已删除 ${res.deleted || 1} 条记录`);
       await refreshAll();
     } catch (e) {
-      message.error(e.message);
+      message.error(errMsg(e));
     }
   };
 
-  const openChildModal = (parent) => {
+  const openChildModal = (parent: LedgerRow) => {
     setChildForm({
       name: '',
       detail: '',
@@ -403,18 +500,21 @@ export default function LedgerPage() {
   };
 
   const submitChild = async () => {
+    const parent = childModal.parent;
+    // 弹窗只会带着 parent 打开，这里只是让类型闭合
+    if (!parent) return;
     if (!childForm.name.trim()) {
       message.warning('请填写支出名称');
       return;
     }
-    if (childForm.amount === null || childForm.amount === undefined || childForm.amount === '') {
+    if (childForm.amount === null || childForm.amount === undefined) {
       message.warning('请填写支出金额');
       return;
     }
     setSubmitting(true);
     try {
       await api.createRecord({
-        parentId: childModal.parent.id,
+        parentId: parent.id,
         name: childForm.name.trim(),
         detail: childForm.detail,
         amount: Number(childForm.amount),
@@ -424,13 +524,13 @@ export default function LedgerPage() {
       setChildModal({ open: false, parent: null });
       await refreshAll();
     } catch (e) {
-      message.error(e.message);
+      message.error(errMsg(e));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const openBatchModal = (parent) => {
+  const openBatchModal = (parent: LedgerRow | null) => {
     const base = month || dayjs(currentPeriod());
     setBatchForm({
       parentName: parent ? parent.name : '',
@@ -444,14 +544,15 @@ export default function LedgerPage() {
   };
 
   const submitBatch = async () => {
-    const items = batchForm.items
+    const items: BatchFillItem[] = batchForm.items
       .filter((i) => i.name && i.name.trim())
       .map((i) => ({ name: i.name.trim(), detail: i.detail, amount: Number(i.amount || 0) }));
     if (!items.length) {
       message.warning('请至少填写一个子项名称');
       return;
     }
-    if (!batchForm.from || !batchForm.to) {
+    const { from, to } = batchForm;
+    if (!from || !to) {
       message.warning('请选择月份范围');
       return;
     }
@@ -461,8 +562,8 @@ export default function LedgerPage() {
         parentName: batchForm.parentName && batchForm.parentName.trim() ? batchForm.parentName.trim() : null,
         createParentIfMissing: true,
         items,
-        fromPeriod: batchForm.from.format('YYYY-MM'),
-        toPeriod: batchForm.to.format('YYYY-MM'),
+        fromPeriod: from.format('YYYY-MM'),
+        toPeriod: to.format('YYYY-MM'),
         detailTemplate: batchForm.detailTemplate,
         skipExisting: batchForm.skipExisting
       });
@@ -481,29 +582,32 @@ export default function LedgerPage() {
       setBatchModal({ open: false, parent: null });
       await refreshAll();
     } catch (e) {
-      message.error(e.message);
+      message.error(errMsg(e));
     } finally {
       setSubmitting(false);
     }
   };
 
+  /** 顶部合计数字滚动到位，刷新后能直观看出变化方向 */
+  const animatedTotal = useCountUp(total);
+
   /* ---------------- 表格 ---------------- */
 
-  const childSummary = (row) => {
+  const childSummary = (row: LedgerRow): string => {
     const names = row.childNames || [];
     if (!names.length) return '—';
     const s = names.join(' · ');
     return s.length > 44 ? `${s.slice(0, 44)}…` : s;
   };
 
-  const columns = useMemo(
+  const columns = useMemo<TableColumnsType<LedgerRow>>(
     () => [
       {
         key: 'tree',
         width: 76,
         className: 'col-tree',
         onHeaderCell: () => ({ className: 'col-tree' }),
-        render: (_, row) => (
+        render: (_: unknown, row: LedgerRow) => (
           <div
             className={`tree-cell depth-${row.depth}`}
             style={{ paddingLeft: row.depth * 14 }}
@@ -532,7 +636,7 @@ export default function LedgerPage() {
         width: '22%',
         className: 'col-name',
         onHeaderCell: () => ({ className: 'col-name' }),
-        render: (name, row) => (
+        render: (name: string, row: LedgerRow) => (
           <div className="name-cell">
             <TextCell
               value={name}
@@ -554,7 +658,7 @@ export default function LedgerPage() {
         width: '26%',
         className: 'col-detail',
         onHeaderCell: () => ({ className: 'col-detail' }),
-        render: (detail, row) => (
+        render: (detail: string | undefined, row: LedgerRow) => (
           <TextCell
             value={detail}
             allowEmpty
@@ -573,7 +677,7 @@ export default function LedgerPage() {
         align: 'right',
         className: 'col-amount',
         onHeaderCell: () => ({ className: 'col-amount' }),
-        render: (subtotal, row) => {
+        render: (subtotal: number | undefined, row: LedgerRow) => {
           // 有子项 → 父项金额由子项汇总，只读
           if (row.hasChildren) {
             return (
@@ -603,7 +707,7 @@ export default function LedgerPage() {
         width: 124,
         className: 'col-period',
         onHeaderCell: () => ({ className: 'col-period' }),
-        render: (period, row) => (
+        render: (period: Period, row: LedgerRow) => (
           <PeriodCell value={period} onCommit={(v) => patch(row.id, { period: v })} />
         )
       },
@@ -614,7 +718,7 @@ export default function LedgerPage() {
         align: 'center',
         className: 'col-action',
         onHeaderCell: () => ({ className: 'col-action' }),
-        render: (_, row) => (
+        render: (_: unknown, row: LedgerRow) => (
           <Space size={2} className="row-actions">
             {row.depth === 0 && (
               <Tooltip title="添加子项">
@@ -651,7 +755,7 @@ export default function LedgerPage() {
   /* ---------------- 渲染 ---------------- */
 
   return (
-    <div>
+    <div className="page">
       <Card className="section-card bar-indigo" size="small">
         <div className="hint-block">
           按月记账：每条记录都归属到某个月，金额填这个月该项花的总额即可，不用按天记。
@@ -716,7 +820,7 @@ export default function LedgerPage() {
       <Card className="section-card bar-teal" size="small">
         <div className="total-strip">
           <span className="total-label">{periodLabel(selectedPeriod)}合计</span>
-          <span className="total-number">{yuan(total)}</span>
+          <span className="total-number">{yuan(animatedTotal)}</span>
           <span className="total-label">
             共 {leafTotalCount} 条明细 · {tree.length} 个支出名称
           </span>
@@ -815,13 +919,15 @@ export default function LedgerPage() {
           </span>
         }
       >
-        <Table
+        <Table<LedgerRow>
           className="ledger-table"
           rowKey="id"
           size="small"
           loading={loading}
           columns={columns}
           dataSource={rows}
+          /* 六列可编辑表格在手机上塞不下，横向滚动，不要把列压到没法读 */
+          scroll={{ x: 720 }}
           pagination={false}
           rowClassName={(row) => (row.depth === 0 ? 'top-row' : 'child-row')}
           locale={{
@@ -845,7 +951,7 @@ export default function LedgerPage() {
         confirmLoading={submitting}
         okText="添加"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <div style={{ display: 'grid', gap: 12, paddingTop: 8 }}>
           <div className="quick-field">
@@ -905,7 +1011,7 @@ export default function LedgerPage() {
         okText="生成记录"
         cancelText="取消"
         width={720}
-        destroyOnClose
+        destroyOnHidden
       >
         <div className="hint-block">
           典型用法：支出名称填「房租」，子项写 3200，月份选 2026-01 ~ 2026-12，

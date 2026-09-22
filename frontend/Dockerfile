@@ -1,16 +1,18 @@
 # ---------- Stage 1: 构建 ----------
-FROM node:22-alpine AS build
+FROM oven/bun:1-alpine AS build
 
 WORKDIR /build
 
-# 国内 npm 镜像，构建更快
-RUN npm config set registry https://registry.npmmirror.com
+# 国内镜像，构建更快（对应原来的 npm config set registry）
+ENV BUN_CONFIG_REGISTRY=https://registry.npmmirror.com
 
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+# bun.lock 存在就按锁定版本装；仓库里还没有时 bun 会自行解析并生成
+COPY package.json bun.lock* ./
+RUN bun install
 
 COPY . .
-RUN npm run build
+# build 脚本是 tsc --noEmit && vite build，类型不过镜像就构建失败
+RUN bun run build
 
 # ---------- Stage 2: 运行 ----------
 FROM nginx:1.27-alpine

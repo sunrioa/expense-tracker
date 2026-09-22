@@ -47,7 +47,7 @@ docker compose up -d --build
    并执行 `deploy/mysql/init.sql` 建表（`docker-entrypoint-initdb.d` 机制，**只在数据卷为空时执行一次**）。
 2. `backend` 容器用 `maven:3.9-eclipse-temurin-17` 编译出 jar，再拷进 `eclipse-temurin:17-jre-jammy` 运行。
    `depends_on: mysql: condition: service_healthy` 保证它等 MySQL 健康检查通过后才启动。
-3. `frontend` 容器用 `node:22-alpine` 打包 React，把 `dist/` 丢进 nginx，并由 nginx 反向代理 `/api/` 到 `backend:8080`。
+3. `frontend` 容器用 `oven/bun:1-alpine` 打包 React，把 `dist/` 丢进 nginx，并由 nginx 反向代理 `/api/` 到 `backend:8080`。
 
 因为前端和后端走的是**同源**（都从 nginx 的 80 端口出去），所以生产环境不存在跨域问题。
 
@@ -184,7 +184,7 @@ docker exec -i ledger-mysql mysql -uroot -p'ledger_root_pwd' expense_tracker < d
 docker pull mysql:8.0
 docker pull maven:3.9-eclipse-temurin-17
 docker pull eclipse-temurin:17-jre-alpine
-docker pull node:22-alpine
+docker pull oven/bun:1-alpine
 docker pull nginx:1.27-alpine
 ```
 
@@ -205,9 +205,9 @@ docker pull nginx:1.27-alpine
 </mirror>
 ```
 
-前端同理，`frontend/Dockerfile` 里默认写死了 `registry.npmmirror.com`，可改成内网 registry。
+前端同理，`frontend/Dockerfile` 里用 `BUN_CONFIG_REGISTRY` 写死了 `registry.npmmirror.com`，可改成内网 registry。
 
-### 3. npm 安装失败
+### 3. 前端依赖安装失败
 
 先把本地 `node_modules` 删掉再重建（`.dockerignore` 已经排除了它，正常不会进镜像）：
 
@@ -310,7 +310,7 @@ java -jar target/expense-tracker-backend.jar \
 ### 前端
 
 ```bash
-cd frontend && npm run build
+cd frontend && bun run build
 ```
 
 把 `frontend/dist/` 拷到 nginx 的站点目录，并把 `frontend/nginx.conf` 里的
@@ -323,5 +323,5 @@ cd frontend && npm run build
 - 想换 MySQL 版本：改 `docker-compose.yml` 里 `image: mysql:8.0` → `mysql:8.4`，
   然后 `docker compose down -v && docker compose up -d --build`（换版本必须清数据卷，否则数据目录不兼容）。
 - 想换后端基础镜像：`backend/Dockerfile` 里 `eclipse-temurin:17-jre-jammy` 可换成 `-alpine`（体积更小）。
-- 想彻底不用前端容器：直接 `npm run build` 后把 `dist` 挂到宿主机 nginx，
+- 想彻底不用前端容器：直接 `bun run build` 后把 `dist` 挂到宿主机 nginx，
   并删掉 compose 里的 `frontend` 服务。

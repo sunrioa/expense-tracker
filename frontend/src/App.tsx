@@ -1,8 +1,9 @@
 import { Layout, Menu, Typography } from 'antd';
 import { AccountBookOutlined, BarChartOutlined } from '@ant-design/icons';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import LedgerPage from './pages/LedgerPage.jsx';
-import StatsPage from './pages/StatsPage.jsx';
+import PageTransition from './components/PageTransition';
+import LedgerPage from './pages/LedgerPage';
+import StatsPage from './pages/StatsPage';
 
 const { Header, Content, Footer } = Layout;
 
@@ -32,11 +33,13 @@ function Shell() {
       </Header>
 
       <Content className="app-content">
-        <Routes>
-          <Route path="/" element={<LedgerPage />} />
-          <Route path="/stats" element={<StatsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <PageTransition>
+          <Routes>
+            <Route path="/" element={<LedgerPage />} />
+            <Route path="/stats" element={<StatsPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </PageTransition>
       </Content>
 
       <Footer className="app-footer">

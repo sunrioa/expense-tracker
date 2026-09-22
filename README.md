@@ -234,8 +234,8 @@ DB_HOST=localhost DB_PORT=3306 DB_NAME=expense_tracker DB_USER=root DB_PASSWORD=
 
 ```bash
 cd frontend
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 打开 http://localhost:5173 ，Vite 已配置 `/api` 代理到 8080，前后端联调无需处理跨域。
@@ -247,7 +247,7 @@ npm run dev
 cd backend && mvn clean package -DskipTests
 
 # 前端：产出 frontend/dist/
-cd frontend && npm run build
+cd frontend && bun run build
 ```
 
 ---

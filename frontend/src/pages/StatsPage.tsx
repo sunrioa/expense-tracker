@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import {
   App as AntApp,
   Button,
@@ -15,15 +16,38 @@ import {
   Tag,
   Tooltip
 } from 'antd';
+import type { TableColumnsType } from 'antd';
 import { ReloadOutlined, RiseOutlined, TagsOutlined, UnorderedListOutlined, WalletOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import type { Dayjs } from 'dayjs';
+import type { EChartsOption } from 'echarts';
 import * as api from '../api';
-import Chart from '../components/Chart.jsx';
+import Chart from '../components/Chart';
+import type { Granularity, PeriodStat, StatsQuery, StatsResponse } from '../types/api';
 import { money, periodLabel, yuan } from '../utils/format';
+import { errMsg } from '../utils/error';
+import { useCountUp } from '../hooks/useCountUp';
 
 const { RangePicker } = DatePicker;
 
-const RANGE_PRESETS = [
+type RangePickerProps = ComponentProps<typeof RangePicker>;
+type DateRange = [Dayjs, Dayjs];
+type PieMode = 'category' | 'name';
+type StatTone = 'indigo' | 'emerald' | 'amber' | 'cyan';
+
+/**
+ * ECharts 回调里的 value 类型很宽（number | string | Date，甚至数组），
+ * 统一收成数字再交给格式化函数。原来的 JS 版本直接把它丢进 yuan()，
+ * 靠运行时的 Number() 兜底 —— 这里把这层转换显式化。
+ */
+function toNum(v: unknown): number {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') return Number(v) || 0;
+  if (Array.isArray(v)) return toNum(v[v.length - 1]);
+  return 0;
+}
+
+const RANGE_PRESETS: RangePickerProps['presets'] = [
   { label: '本月', value: [dayjs().startOf('month'), dayjs().endOf('month')] },
   { label: '上月', value: [dayjs().subtract(1, 'month').startOf('month'), dayjs().subtract(1, 'month').endOf('month')] },
   { label: '近3个月', value: [dayjs().subtract(2, 'month').startOf('month'), dayjs().endOf('month')] },
@@ -32,7 +56,25 @@ const RANGE_PRESETS = [
   { label: '去年', value: [dayjs().subtract(1, 'year').startOf('year'), dayjs().subtract(1, 'year').endOf('year')] }
 ];
 
-function StatCard({ label, value, extra, primary, tone = 'indigo', icon }) {
+/** 饼图的数据项：在 ECharts 标准字段之外挂了 count / percent 供 tooltip 使用 */
+interface PieDatum {
+  name: string;
+  value: number;
+  count: number;
+  percent: number;
+  itemStyle: { color: string };
+}
+
+interface StatCardProps {
+  label: ReactNode;
+  value: ReactNode;
+  extra?: ReactNode;
+  primary?: boolean;
+  tone?: StatTone;
+  icon?: ReactNode;
+}
+
+function StatCard({ label, value, extra, primary, tone = 'indigo', icon }: StatCardProps) {
   return (
     <div className={`stat-card tone-${tone}${primary ? ' primary' : ''}`}>
       <div className="stat-head">
@@ -48,22 +90,22 @@ function StatCard({ label, value, extra, primary, tone = 'indigo', icon }) {
 export default function StatsPage() {
   const { message } = AntApp.useApp();
 
-  const [granularity, setGranularity] = useState('month');
-  const [range, setRange] = useState([dayjs().startOf('year'), dayjs().endOf('month')]);
-  const [data, setData] = useState(null);
+  const [granularity, setGranularity] = useState<Granularity>('month');
+  const [range, setRange] = useState<DateRange>([dayjs().startOf('year'), dayjs().endOf('month')]);
+  const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [pieMode, setPieMode] = useState('category');
+  const [pieMode, setPieMode] = useState<PieMode>('category');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { granularity };
+      const params: StatsQuery = { granularity };
       if (range && range[0]) params.from = range[0].format('YYYY-MM');
       if (range && range[1]) params.to = range[1].format('YYYY-MM');
       const res = await api.fetchStats(params);
       setData(res);
     } catch (e) {
-      message.error(e.message);
+      message.error(errMsg(e));
       setData(null);
     } finally {
       setLoading(false);
@@ -74,10 +116,10 @@ export default function StatsPage() {
     load();
   }, [load]);
 
-  const periods = (data && data.byPeriod) || [];
+  const periods: PeriodStat[] = (data && data.byPeriod) || [];
   const isYear = granularity === 'year';
 
-  const pieData = useMemo(() => {
+  const pieData = useMemo<PieDatum[]>(() => {
     if (!data) return [];
     const src = pieMode === 'category' ? data.byCategory : data.byName;
     return (src || []).map((it) => ({
@@ -91,12 +133,17 @@ export default function StatsPage() {
 
   const hasData = !!data && data.recordCount > 0;
 
-  const barOption = useMemo(
+  /* 三个关键指标做数字滚动。hook 必须无条件调用，所以 data 为 null 时传 0 */
+  const animatedTotal = useCountUp(data?.total ?? 0);
+  const animatedCount = useCountUp(data?.recordCount ?? 0);
+  const animatedMax = useCountUp(data?.maxAmount ?? 0);
+
+  const barOption = useMemo<EChartsOption>(
     () => ({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
-        valueFormatter: (v) => yuan(v)
+        valueFormatter: (v) => yuan(toNum(v))
       },
       grid: { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
       xAxis: {
@@ -113,7 +160,7 @@ export default function StatsPage() {
       },
       yAxis: {
         type: 'value',
-        axisLabel: { color: '#8c8c8c', formatter: (v) => `¥${v}` },
+        axisLabel: { color: '#8c8c8c', formatter: (v: number) => `¥${v}` },
         splitLine: { lineStyle: { color: '#eef1fb' } }
       },
       series: [
@@ -160,7 +207,7 @@ export default function StatsPage() {
             position: 'top',
             color: '#4338ca',
             fontSize: 10,
-            formatter: (p) => money(p.value)
+            formatter: (p) => money(toNum(p.value))
           }
         }
       ]
@@ -169,7 +216,7 @@ export default function StatsPage() {
   );
 
   /** 累计支出趋势：一眼看出这一年花了多少、什么时候被拉高的 */
-  const cumulativeOption = useMemo(() => {
+  const cumulativeOption = useMemo<EChartsOption>(() => {
     let acc = 0;
     const values = periods.map((p) => {
       acc += Number(p.total || 0);
@@ -178,7 +225,7 @@ export default function StatsPage() {
     return {
       tooltip: {
         trigger: 'axis',
-        valueFormatter: (v) => yuan(v)
+        valueFormatter: (v) => yuan(toNum(v))
       },
       grid: { left: 8, right: 16, top: 24, bottom: 8, containLabel: true },
       xAxis: {
@@ -191,7 +238,7 @@ export default function StatsPage() {
       },
       yAxis: {
         type: 'value',
-        axisLabel: { color: '#8c8c8c', formatter: (v) => `¥${v}` },
+        axisLabel: { color: '#8c8c8c', formatter: (v: number) => `¥${v}` },
         splitLine: { lineStyle: { color: '#eef1fb' } }
       },
       series: [
@@ -222,11 +269,15 @@ export default function StatsPage() {
     };
   }, [periods]);
 
-  const pieOption = useMemo(
+  const pieOption = useMemo<EChartsOption>(
     () => ({
       tooltip: {
         trigger: 'item',
-        formatter: (p) => `${p.name}<br/>${yuan(p.value)}<br/>占比 ${p.percent}%`
+        formatter: (p) => {
+          // trigger:'item' 运行时只会给单个对象，但类型上是「对象或数组」的并集
+          const it = Array.isArray(p) ? p[0] : p;
+          return `${it.name}<br/>${yuan(toNum(it.value))}<br/>占比 ${it.percent}%`;
+        }
       },
       legend: {
         type: 'scroll',
@@ -234,7 +285,7 @@ export default function StatsPage() {
         right: 4,
         top: 'middle',
         textStyle: { color: '#595959', fontSize: 12 },
-        formatter: (name) => (name.length > 10 ? `${name.slice(0, 10)}…` : name)
+        formatter: (name: string) => (name.length > 10 ? `${name.slice(0, 10)}…` : name)
       },
       series: [
         {
@@ -251,11 +302,11 @@ export default function StatsPage() {
     [pieData]
   );
 
-  const periodColumns = [
+  const periodColumns: TableColumnsType<PeriodStat> = [
     {
       title: isYear ? '年份' : '月份',
       dataIndex: 'label',
-      render: (v, row) => (
+      render: (v: string, row: PeriodStat) => (
         <Space size={6}>
           <span>{v}</span>
           {!isYear && row.key && <span className="muted">{row.key}</span>}
@@ -268,13 +319,13 @@ export default function StatsPage() {
       align: 'right',
       width: 160,
       sorter: (a, b) => Number(a.total) - Number(b.total),
-      render: (v) => <b>{yuan(v)}</b>
+      render: (v: number) => <b>{yuan(v)}</b>
     },
     {
       title: '占比',
       dataIndex: 'percent',
       width: 220,
-      render: (v) => (
+      render: (v: number) => (
         <Progress
           percent={Number(v || 0)}
           size="small"
@@ -288,17 +339,17 @@ export default function StatsPage() {
       dataIndex: 'count',
       align: 'right',
       width: 100,
-      render: (v) => <span>{v} 条</span>
+      render: (v: number) => <span>{v} 条</span>
     }
   ];
 
   return (
-    <div>
+    <div className="page">
       <Card className="section-card" size="small">
         <Row gutter={[12, 12]} align="middle" justify="space-between">
           <Col>
             <Space wrap>
-              <Segmented
+              <Segmented<Granularity>
                 value={granularity}
                 onChange={setGranularity}
                 options={[
@@ -310,7 +361,10 @@ export default function StatsPage() {
                 picker="month"
                 allowClear={false}
                 value={range}
-                onChange={(v) => v && setRange(v)}
+                onChange={(v) => {
+                  // allowClear={false} 下运行时不会给 null，但类型上两端都可空，这里显式收口
+                  if (v && v[0] && v[1]) setRange([v[0], v[1]]);
+                }}
                 presets={RANGE_PRESETS}
                 format="YYYY-MM"
               />
@@ -331,7 +385,7 @@ export default function StatsPage() {
             tone="indigo"
             icon={<WalletOutlined />}
             label="区间支出合计"
-            value={yuan(data ? data.total : 0)}
+            value={yuan(animatedTotal)}
             extra={
               data && data.fromPeriod
                 ? `${periodLabel(data.fromPeriod)} ~ ${periodLabel(data.toPeriod)}`
@@ -344,7 +398,7 @@ export default function StatsPage() {
             tone="emerald"
             icon={<UnorderedListOutlined />}
             label="明细条数"
-            value={data ? data.recordCount : 0}
+            value={Math.round(animatedCount)}
             extra={data ? `覆盖 ${data.monthCount} 个月 · 平均每月 ${yuan(data.avgPerMonth)}` : '—'}
           />
         </Col>
@@ -353,7 +407,7 @@ export default function StatsPage() {
             tone="amber"
             icon={<RiseOutlined />}
             label="最大单笔"
-            value={data ? yuan(data.maxAmount) : yuan(0)}
+            value={yuan(animatedMax)}
             extra={
               data && data.maxAmountName
                 ? `${data.maxAmountName} · ${periodLabel(data.maxAmountPeriod)}`
@@ -413,7 +467,7 @@ export default function StatsPage() {
               <Radio.Group
                 size="small"
                 value={pieMode}
-                onChange={(e) => setPieMode(e.target.value)}
+                onChange={(e) => setPieMode(e.target.value as PieMode)}
                 optionType="button"
                 buttonStyle="solid"
                 options={[
@@ -437,12 +491,13 @@ export default function StatsPage() {
         size="small"
         title={isYear ? '按年明细' : '按月明细'}
       >
-        <Table
+        <Table<PeriodStat>
           rowKey="key"
           size="small"
           loading={loading}
           dataSource={periods}
           columns={periodColumns}
+          scroll={{ x: 560 }}
           pagination={periods.length > 12 ? { pageSize: 12, size: 'small' } : false}
           locale={{ emptyText: <Empty description="暂无统计数据" /> }}
           summary={() => {
