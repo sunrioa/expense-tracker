@@ -682,11 +682,6 @@ body {
   flex-wrap: wrap;
 }
 
-.quick-hint {
-  color: var(--text-sub);
-  font-size: 12px;
-}
-
 /* ---------- 渐变主按钮 ---------- */
 .btn-gradient.ant-btn-primary {
   position: relative;

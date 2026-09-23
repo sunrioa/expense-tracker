@@ -684,9 +684,8 @@ export default function LedgerPage() {
             value={detail}
             allowEmpty
             className={row.hasChildren ? 'text-hint' : 'text-leaf'}
-            placeholder={
-              row.hasChildren ? childSummary(row) : '这笔钱的说明，如：单车80+公交60+地铁120'
-            }
+            // 无子项的空白行不再提示示例文案，空着更干净
+            placeholder={row.hasChildren ? childSummary(row) : undefined}
             onCommit={(v) => patch(row.id, { detail: v })}
           />
         )
@@ -799,7 +798,6 @@ export default function LedgerPage() {
       <div className="quick-field">
         <label>支出详细</label>
         <Input
-          placeholder="这笔钱的说明，如：单车80+公交60"
           value={quick.detail}
           onChange={(e) => setQuick((q) => ({ ...q, detail: e.target.value }))}
           onPressEnter={submitQuick}
@@ -946,7 +944,6 @@ export default function LedgerPage() {
                 >
                   添加记录
                 </Button>
-                <span className="quick-hint">子项只支持一层：顶级条目 → 子项</span>
               </div>
             </div>
           </>
@@ -1039,7 +1036,6 @@ export default function LedgerPage() {
           <div className="quick-field">
             <label>归到哪个顶级条目下</label>
             {quickParentPicker}
-            <span className="field-hint">留空 = 新建一个顶级条目。子项只支持一层</span>
           </div>
         </div>
       </Drawer>
