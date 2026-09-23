@@ -1,0 +1,25 @@
+{
+  "name": "@ledger/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ledger/shared": "workspace:*",
+    "@hono/zod-validator": "latest",
+    "drizzle-orm": "latest",
+    "hono": "latest",
+    "mysql2": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "drizzle-kit": "latest",
+    "typescript": "latest"
+  }
+}

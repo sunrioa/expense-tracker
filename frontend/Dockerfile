@@ -1,16 +1,22 @@
 # ---------- Stage 1: 构建 ----------
-FROM node:22-alpine AS build
+FROM oven/bun:1-alpine AS build
 
 WORKDIR /build
 
-# 国内 npm 镜像，构建更快
-RUN npm config set registry https://registry.npmmirror.com
+# 国内镜像，构建更快
+ENV BUN_CONFIG_REGISTRY=https://registry.npmmirror.com
 
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+COPY package.json bun.lock* ./
+COPY packages/shared/package.json packages/shared/
+COPY frontend/package.json frontend/
+RUN bun install --frozen-lockfile || bun install
 
-COPY . .
-RUN npm run build
+# 前端会从 @ledger/shared 引类型，共享包必须一起进构建上下文
+COPY packages/shared packages/shared
+COPY frontend frontend
+
+# build 脚本是 tsc --noEmit && vite build，类型不过镜像就构建失败
+RUN cd frontend && bun run build
 
 # ---------- Stage 2: 运行 ----------
 FROM nginx:1.27-alpine
@@ -18,8 +24,8 @@ FROM nginx:1.27-alpine
 ENV TZ=Asia/Shanghai
 RUN ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime 2>/dev/null || true
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /build/dist /usr/share/nginx/html
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /build/frontend/dist /usr/share/nginx/html
 
 EXPOSE 80
 

@@ -5,10 +5,13 @@
 > 大多数记账 App 假设你愿意每天记一笔。但如果你只想**一个月盘一次账**——
 > 把「吃 960」「交通 205」这样一个月填一行就完事，这个项目就是为这个场景写的。
 
-- **后端**：Java 17 + Spring Boot 3.2 + Spring Data JPA
+- **后端**：Bun + Hono + Drizzle ORM + Zod
 - **前端**：React 18 + Vite + Ant Design 5 + ECharts
 - **数据库**：MySQL 8
 - **部署**：Docker Compose 一键启动（MySQL + 后端 + nginx 前端）
+
+全栈 TypeScript，前后端**共用同一份类型定义**（`packages/shared`）：
+接口字段改了，两边同时编译不过，不会出现「后端改了字段、前端还在按老字段取值」的情况。
 
 ## 特性
 
@@ -18,17 +21,34 @@
 - **就地编辑** —— 表格里点任意单元格直接改，不用打开编辑弹窗
 - **按月批量生成** —— 「房租」这类固定支出，一次铺满 12 个月，重复的自动跳过
 - **统计** —— 按月/按年切换，柱状图 + 累计趋势 + 构成饼图 + 排行
+- **深色模式** —— 跟随系统，界面、图表、组件库同时切换，不用刷新
+- **手机单独布局** —— 卡片列表 + 抽屉，不是把桌面表格缩小塞进去
 - **老库自动迁移** —— 从按天记账的旧版本升级不用手动改库
 
 ## 界面
 
+浅色 / 深色跟随系统。
+
 **记账页**
 
-![记账页](docs/screenshots/ledger.png)
+| 浅色 | 深色 |
+| --- | --- |
+| ![记账页](docs/screenshots/ledger.png) | ![记账页·深色](docs/screenshots/ledger-dark.png) |
 
 **统计页**
 
-![统计页](docs/screenshots/stats.png)
+| 浅色 | 深色 |
+| --- | --- |
+| ![统计页](docs/screenshots/stats.png) | ![统计页·深色](docs/screenshots/stats-dark.png) |
+
+**手机**
+
+手机上是另一套布局，不是桌面版的等比缩小：明细用卡片列表（不横滑），
+添加和编辑都走底部抽屉，常驻的说明文字和表单收起来。
+
+| 记账页 | 统计页 |
+| --- | --- |
+| ![手机·记账页](docs/screenshots/mobile-ledger.png) | ![手机·统计页](docs/screenshots/mobile-stats.png) |
 
 ---
 
@@ -119,24 +139,32 @@
 ## 三、目录结构
 
 ```
-expense-tracker/
-├── backend/                        # Spring Boot 后端
-│   ├── src/main/java/com/ledger/
-│   │   ├── controller/             # REST 接口
-│   │   ├── service/                # 业务逻辑（树构建、汇总、统计）
-│   │   ├── repository/             # JPA Repository
-│   │   ├── entity/ExpenseRecord    # 支出记录实体（自关联树，按月）
-│   │   ├── dto/                    # 请求 / 响应对象
-│   │   ├── common/Periods          # 月份工具（yyyy-MM 归一化）
-│   │   └── config/SchemaMigration  # 启动时在线迁移（老库自动升级）
-│   ├── src/main/resources/application.yml
-│   ├── maven-settings.xml          # 阿里云 Maven 镜像（加速构建）
-│   └── Dockerfile
+expense-tracker/                    # Bun workspaces 单仓
+├── packages/shared/                # 前后端共享层
+│   └── src/
+│       ├── types.ts                # 响应体类型（不依赖 zod，前端零运行时代价）
+│       ├── schemas.ts              # 请求体校验规则（仅服务端加载）
+│       ├── period.ts               # 月份规则 yyyy-MM（两边共用同一个定义）
+│       └── money.ts                # 金额按整数分运算，避免浮点漂移
+├── server/                         # Bun + Hono 后端
+│   └── src/
+│       ├── domain/                 # 纯业务逻辑，不碰数据库，可直接单测
+│       │   ├── tree.ts             # 树构建 / 过滤 / 路径 / 级联
+│       │   ├── stats.ts            # 统计聚合 + 分类配色
+│       │   └── batch.ts            # 按月批量生成的规划器
+│       ├── db/
+│       │   ├── schema.ts           # Drizzle 表定义
+│       │   ├── bootstrap.ts        # 幂等建表 + 老库在线迁移
+│       │   ├── mysql.ts            # MySQL 仓储实现
+│       │   └── memory.ts           # 内存仓储（测试 / 无库演示）
+│       ├── services/               # 编排：取数 → 纯逻辑 → 落库
+│       ├── routes/                 # Hono 路由 + Zod 校验
+│       └── *.test.ts               # bun test，109 个用例
 ├── frontend/                       # React 前端
-│   ├── src/pages/LedgerPage.jsx    # 记账页（表单 + 树形表格）
-│   ├── src/pages/StatsPage.jsx     # 统计页（按月 / 按年 + 图表）
-│   ├── src/components/Chart.jsx    # ECharts 封装
-│   ├── src/api/index.js            # 接口封装
+│   ├── src/pages/LedgerPage.tsx    # 记账页（表单 + 树形表格）
+│   ├── src/pages/StatsPage.tsx     # 统计页（按月 / 按年 + 图表）
+│   ├── src/components/Chart.tsx    # ECharts 封装
+│   ├── src/api/index.ts            # 接口封装
 │   ├── nginx.conf                  # 静态资源 + /api 反向代理
 │   └── Dockerfile
 ├── deploy/mysql/
@@ -175,7 +203,7 @@ docker compose up -d --build
 
 ```bash
 docker compose ps                 # 查看容器状态
-docker compose logs -f backend    # 看后端日志
+docker compose logs -f server     # 看后端日志
 docker compose logs -f frontend   # 看前端日志
 docker compose down               # 停止（数据保留）
 docker compose down -v            # 停止并删除数据卷（清空所有数据）
@@ -214,41 +242,59 @@ docker exec -i ledger-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" expense_tracke
 CREATE DATABASE expense_tracker DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-### 2. 启动后端
+### 2. 安装依赖（在仓库根目录执行一次即可）
 
 ```bash
-cd backend
-mvn spring-boot:run
-# 默认连 localhost:3306 / 库 expense_tracker / 用户 root / 密码 root
+bun install
 ```
 
-需要改连接信息就用环境变量，不用改配置文件：
+### 3. 启动后端
 
 ```bash
-DB_HOST=localhost DB_PORT=3306 DB_NAME=expense_tracker DB_USER=root DB_PASSWORD=你的密码 mvn spring-boot:run
+bun run server
+```
+
+默认连 `localhost:3306` / 库 `expense_tracker` / 用户 `root` / 密码 `root`。
+改连接信息用环境变量，不用改配置文件：
+
+```bash
+DB_HOST=localhost DB_PORT=3306 DB_NAME=expense_tracker DB_USER=root DB_PASSWORD=你的密码 bun run server
 ```
 
 后端跑在 http://localhost:8080 ，健康检查：`GET /api/health`
 
-### 3. 启动前端
+**手上没有 MySQL？** 用内存模式直接把界面跑起来看效果（数据重启即失，别用来记真账）：
 
 ```bash
-cd frontend
-npm install
-npm run dev
+DB_DRIVER=memory SEED_DEMO=1 bun run server
+```
+
+### 4. 启动前端
+
+```bash
+bun run web
 ```
 
 打开 http://localhost:5173 ，Vite 已配置 `/api` 代理到 8080，前后端联调无需处理跨域。
 
-### 4. 手动打包
+### 5. 跑测试
 
 ```bash
-# 后端：产出 backend/target/expense-tracker-backend.jar
-cd backend && mvn clean package -DskipTests
-
-# 前端：产出 frontend/dist/
-cd frontend && npm run build
+bun test
 ```
+
+109 个用例，覆盖月份归一化、金额整数分运算、树构建与过滤、批量生成的判重与上限、
+统计聚合，以及全部 HTTP 接口的契约。核心业务逻辑是纯函数，测试不需要数据库。
+
+### 6. 手动打包
+
+前端产出 `frontend/dist/`：
+
+```bash
+bun run --filter expense-tracker-frontend build
+```
+
+后端不需要打包 —— Bun 直接执行 TypeScript 源码。
 
 ---
 
