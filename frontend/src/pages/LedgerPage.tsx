@@ -218,7 +218,7 @@ export default function LedgerPage() {
       </div>
     );
   } else if (searchOpen) {
-    body = <p className="search-idle">输入关键词，在全部月份里找。比如「地铁」可以看出一共花了多少。</p>;
+    body = <p className="search-idle">在全部月份里搜名称和备注</p>;
   } else {
     body = (
       <>
@@ -272,7 +272,7 @@ export default function LedgerPage() {
               <p className="empty-title">{tree.length ? `${monthLabel(month)}还没有记录` : '开始记第一笔'}</p>
               <p className="empty-text">
                 {!tree.length
-                  ? '按月记账：每笔支出归到一个月里；同类的可以放进一个分组，比如「交通」下面放地铁、公交。'
+                  ? '按月记账：每笔支出归到一个月里，同类的可以放进一个分组。'
                   : prevItems.length
                     ? `可以沿用${monthShort(prev)}的条目，再逐项改金额。`
                     : '点「记一笔」开始。'}

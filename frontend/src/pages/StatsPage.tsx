@@ -324,6 +324,7 @@ export default function StatsPage() {
                       <span className="tip">
                         <b>{yuan(d.value)}</b>
                         <span>{d.label}</span>
+                        <span>{isYear ? '点击查看这一年的每个月' : '点击打开这个月的账本'}</span>
                       </span>
                     )}
                     onSelect={(d) =>
@@ -332,7 +333,6 @@ export default function StatsPage() {
                         : navigate(d.key === now ? '/' : `/?m=${d.key}`)
                     }
                   />
-                  <p className="card-hint">{isYear ? '点柱子查看那一年的每个月' : '点柱子打开那个月的账本'}</p>
                 </>
               ) : (
                 <div className="table-wrap">

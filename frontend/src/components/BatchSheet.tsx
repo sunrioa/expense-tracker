@@ -111,7 +111,7 @@ function BatchForm({ start, onClose }: { start: Period; onClose: () => void }) {
       <SheetHead title="批量生成" onClose={onClose} />
 
       <div className="sheet-body">
-        <p className="sheet-note">把同样的几笔支出一次写进连续的多个月，比如全年房租。已经有同名记录的月份会跳过。</p>
+        <p className="sheet-note">同样的几笔支出一次写进连续的多个月，已有同名记录的月份自动跳过。</p>
 
         <div className="field">
           <span className="field-label">月份</span>
@@ -135,10 +135,10 @@ function BatchForm({ start, onClose }: { start: Period; onClose: () => void }) {
 
         <div className="field">
           <label className="field-label" htmlFor="batch-group">
-            分组
+            分组 <span className="field-optional">选填</span>
           </label>
           <AutoComplete id="batch-group" value={group} options={groupOptions} onChange={(v: string) => setGroup(v)}>
-            <Input autoComplete="off" placeholder="选填，比如：房租。留空就是独立条目" />
+            <Input autoComplete="off" />
           </AutoComplete>
         </div>
 
@@ -153,7 +153,7 @@ function BatchForm({ start, onClose }: { start: Period; onClose: () => void }) {
                   aria-label={`第 ${i + 1} 条的名称`}
                   maxLength={64}
                   autoComplete="off"
-                  placeholder="比如：主卧"
+                  placeholder="名称"
                   value={l.name}
                   onChange={(e) => patchLine(l.id, { name: e.target.value })}
                 />
@@ -197,7 +197,6 @@ function BatchForm({ start, onClose }: { start: Period; onClose: () => void }) {
               id="batch-tpl"
               maxLength={255}
               autoComplete="off"
-              placeholder="比如「{month} 月房租」"
               value={template}
               onChange={(e) => setTemplate(e.target.value)}
             />

@@ -126,7 +126,7 @@ function RecordForm({ state, onClose, onSwitch }: { state: EditorState } & Omit<
   const validate = (): boolean => {
     const e: Errors = {};
     const nm = name.trim();
-    if (!nm) e.name = '写个名称，比如「午餐」「地铁」';
+    if (!nm) e.name = '请填写名称';
     else if (nm.length > 64) e.name = '名称最长 64 个字';
     if (!isGroup) {
       if (amount === null || Number.isNaN(amount)) e.amount = '填一下金额';
@@ -369,14 +369,13 @@ function RecordForm({ state, onClose, onSwitch }: { state: EditorState } & Omit<
 
         <div className="field">
           <label className="field-label" htmlFor="rec-detail">
-            备注
+            备注 <span className="field-optional">选填</span>
           </label>
           <Input
             id="rec-detail"
             value={detail}
             maxLength={255}
             autoComplete="off"
-            placeholder="选填，比如「单车 80 + 公交 60」"
             onChange={(e) => setDetail(e.target.value)}
             onPressEnter={() => void submit()}
           />
