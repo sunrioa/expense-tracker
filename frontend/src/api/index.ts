@@ -3,12 +3,11 @@ import type {
   ApiEnvelope,
   BatchFillRequest,
   BatchFillResult,
+  CopyMonthRequest,
+  CopyMonthResult,
   DeleteResult,
-  OptionsQuery,
-  Period,
   RangeQuery,
   RecordNode,
-  RecordOption,
   RecordPatch,
   RecordRequest,
   StatsQuery,
@@ -72,20 +71,9 @@ const del = <T>(url: string): Promise<T> => unwrap<T>(http.delete(url));
 
 /* ------------------------------------------------------------ 记账 */
 
-/** 树形查询：顶级为支出名称，下挂子项 */
+/** 树形查询：顶级为支出名称，下挂子项。不传区间就是全部月份 */
 export const fetchTree = (params: RangeQuery = {}): Promise<RecordNode[]> =>
   get<RecordNode[]>('/records/tree', params);
-
-/** 扁平明细，仅叶子节点 */
-export const fetchLeaves = (params: RangeQuery = {}): Promise<RecordNode[]> =>
-  get<RecordNode[]>('/records/leaves', params);
-
-/** 父项下拉选项 */
-export const fetchOptions = (params: OptionsQuery = {}): Promise<RecordOption[]> =>
-  get<RecordOption[]>('/records/options', params);
-
-/** 已有月份列表（倒序） */
-export const fetchPeriods = (): Promise<Period[]> => get<Period[]>('/records/periods');
 
 export const createRecord = (data: RecordRequest): Promise<RecordNode> =>
   post<RecordNode>('/records', data);
@@ -99,6 +87,10 @@ export const deleteRecord = (id: number): Promise<DeleteResult> =>
 /** 按月批量生成：若干子项 × 一段月份 */
 export const batchFill = (data: BatchFillRequest): Promise<BatchFillResult> =>
   post<BatchFillResult>('/records/batch', data);
+
+/** 把一个月的全部记录复制到另一个月，已有的同名条目跳过 */
+export const copyMonth = (data: CopyMonthRequest): Promise<CopyMonthResult> =>
+  post<CopyMonthResult>('/records/copy', data);
 
 /* ------------------------------------------------------------ 统计 */
 

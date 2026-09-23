@@ -1,87 +1,64 @@
-import { roundAmount, sumAmounts, type Period } from '@ledger/shared';
+import { currentPeriod, type Period } from '@ledger/shared';
 
 /**
- * 前端展示用的格式化。
- *
- * 金额运算和月份规则统一从 @ledger/shared 取 —— 和后端用的是同一份实现，
- * 不会出现「前端算出来 6839.65、后端算出来 6839.649999」这种事。
+ * 展示用的格式化。金额运算（求和、取整）一律走 @ledger/shared，
+ * 这里只管「怎么显示」。
  */
 
 type Numeric = number | string | null | undefined;
 
-/** 树形节点的最小形状，够 walkTree 递归就行 */
-export interface TreeLike<T> {
-  children?: T[] | null;
-}
+const fmt2 = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt0 = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 });
 
-// 当月：和后端 normalizePeriod / currentPeriod 共用同一套定义
-export { currentPeriod } from '@ledger/shared';
-// 精确到分的求和 / 四舍五入，前端也用同一份
-export { roundAmount, sumAmounts };
+/** 6839.65 → 6,839.65 */
+export const money = (v: Numeric): string => fmt2.format(Number(v || 0));
 
-export const money = (v: Numeric): string => {
-  const n = Number(v || 0);
-  return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
-
+/** 6839.65 → ¥6,839.65 */
 export const yuan = (v: Numeric): string => `¥${money(v)}`;
 
-/**
- * 2026-09 → 2026年09月。
- *
- * 和共享层的 periodLabelCN 差一个语义：这里 null 表示「没有筛选月份」，
- * 所以给的是「全部月份」而不是「未知月份」。
- */
-export const periodLabel = (p?: Period | null): string => {
-  if (!p) return '全部月份';
+const oneDecimal = (n: number) => String(Math.round(n * 10) / 10);
+
+/** 坐标轴、小标签上的紧凑写法：860 / 8,600 / 1.2万 / 3.5亿 */
+export function compact(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 1e8) return `${oneDecimal(v / 1e8)}亿`;
+  if (a >= 1e4) return `${oneDecimal(v / 1e4)}万`;
+  return fmt0.format(Math.round(v));
+}
+
+/** 占比，保留一位小数；极小但非零时不显示成 0% */
+export function percent(part: number, total: number): string {
+  if (!total || !part) return '0%';
+  const p = (part / total) * 100;
+  if (p < 0.1) return '<0.1%';
+  return `${oneDecimal(p)}%`;
+}
+
+function parts(p: Period): [number, number] | null {
   const m = /^(\d{4})-(\d{2})$/.exec(p);
-  return m ? `${m[1]}年${m[2]}月` : p;
-};
-
-/** 2026-09 → 09月（图表轴上更短） */
-export const periodShort = (p?: Period | null): string => {
-  if (!p) return '';
-  const m = /^(\d{4})-(\d{2})$/.exec(p);
-  return m ? `${m[2]}月` : p;
-};
-
-/** 遍历树，回调每个节点 */
-export function walkTree<T extends TreeLike<T>>(
-  nodes: T[] | null | undefined,
-  fn: (node: T, parent: T | null) => void,
-  parent: T | null = null
-): void {
-  (nodes ?? []).forEach((n) => {
-    fn(n, parent);
-    if (n.children && n.children.length) {
-      walkTree(n.children, fn, n);
-    }
-  });
+  return m ? [Number(m[1]), Number(m[2])] : null;
 }
 
-/** 收集所有「有子项」的节点 id */
-export function groupIds<T extends TreeLike<T> & { id: number; hasChildren: boolean }>(
-  nodes: T[] | null | undefined
-): number[] {
-  const ids: number[] = [];
-  walkTree(nodes, (n) => {
-    if (n.hasChildren) ids.push(n.id);
-  });
-  return ids;
+/** 2026-09 → 2026年9月 */
+export function monthLabel(p: Period): string {
+  const x = parts(p);
+  return x ? `${x[0]}年${x[1]}月` : p;
 }
 
-/** 树的总金额 = 各顶级节点汇总之和 */
-export function treeTotal(nodes: ReadonlyArray<{ subtotal?: Numeric }> | null | undefined): number {
-  return sumAmounts((nodes ?? []).map((n) => n.subtotal ?? 0));
+/** 2026-09 → 9月 */
+export function monthShort(p: Period): string {
+  const x = parts(p);
+  return x ? `${x[1]}月` : p;
 }
 
-/** 树中叶子节点数量 */
-export function leafCount<T extends TreeLike<T> & { hasChildren: boolean }>(
-  nodes: T[] | null | undefined
-): number {
-  let c = 0;
-  walkTree(nodes, (n) => {
-    if (!n.hasChildren) c += 1;
-  });
-  return c;
+/** 今年的月份省掉年份：2026-09 → 9月，2025-12 → 2025年12月 */
+export function monthSmart(p: Period, now: Period = currentPeriod()): string {
+  return p.slice(0, 4) === now.slice(0, 4) ? monthShort(p) : monthLabel(p);
+}
+
+/** 月份区间的标签：同一年合并年份 —— 2026年1月 – 9月 */
+export function rangeLabel(from: Period, to: Period): string {
+  if (from === to) return monthLabel(from);
+  if (from.slice(0, 4) === to.slice(0, 4)) return `${monthLabel(from)} – ${monthShort(to)}`;
+  return `${monthLabel(from)} – ${monthLabel(to)}`;
 }

@@ -1,608 +1,397 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ComponentProps, ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Segmented } from 'antd';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  App as AntApp,
-  Button,
-  Card,
-  Col,
-  DatePicker,
-  Empty,
-  Progress,
-  Radio,
-  Row,
-  Segmented,
-  Space,
-  Table,
-  Tag,
-  Tooltip
-} from 'antd';
-import type { TableColumnsType } from 'antd';
-import { ReloadOutlined, RiseOutlined, TagsOutlined, UnorderedListOutlined, WalletOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
-import type { Dayjs } from 'dayjs';
-import type { EChartsOption } from 'echarts';
+  currentPeriod,
+  normalizePeriod,
+  shiftPeriod,
+  type Granularity,
+  type NameStat,
+  type Period,
+  type PeriodStat,
+  type StatsResponse
+} from '@ledger/shared';
 import * as api from '../api';
-import Chart from '../components/Chart';
-import type { Granularity, PeriodStat, StatsQuery, StatsResponse } from '@ledger/shared';
-import { money, periodLabel, periodShort, sumAmounts, yuan } from '../utils/format';
-import { errMsg } from '../utils/error';
-import { useCountUp } from '../hooks/useCountUp';
-import { useColorScheme } from '../hooks/useColorScheme';
+import { useLedger } from '../state/ledger';
 import { useIsNarrow } from '../hooks/useMediaQuery';
-import { chartTheme } from '../theme/chartTheme';
+import { errMsg } from '../utils/error';
+import { compact, money, monthLabel, monthSmart, percent, rangeLabel, yuan } from '../utils/format';
+import { cls } from '../utils/cls';
+import BarChart from '../components/BarChart';
+import CompositionBar, { slotColor } from '../components/CompositionBar';
+import { MonthField } from '../components/MonthGrid';
+import Money from '../components/Money';
+import Icon from '../components/Icon';
 
-const { RangePicker } = DatePicker;
+type Preset = '6m' | '12m' | 'ytd' | 'ly' | 'all' | 'custom';
 
-type RangePickerProps = ComponentProps<typeof RangePicker>;
-type DateRange = [Dayjs, Dayjs];
-type PieMode = 'category' | 'name';
-type StatTone = 'teal' | 'sage' | 'amber' | 'cyan';
-
-/**
- * ECharts 回调里的 value 类型很宽（number | string | Date，甚至数组），
- * 统一收成数字再交给格式化函数。原来的 JS 版本直接把它丢进 yuan()，
- * 靠运行时的 Number() 兜底 —— 这里把这层转换显式化。
- */
-function toNum(v: unknown): number {
-  if (typeof v === 'number') return v;
-  if (typeof v === 'string') return Number(v) || 0;
-  if (Array.isArray(v)) return toNum(v[v.length - 1]);
-  return 0;
-}
-
-const RANGE_PRESETS: RangePickerProps['presets'] = [
-  { label: '本月', value: [dayjs().startOf('month'), dayjs().endOf('month')] },
-  { label: '上月', value: [dayjs().subtract(1, 'month').startOf('month'), dayjs().subtract(1, 'month').endOf('month')] },
-  { label: '近3个月', value: [dayjs().subtract(2, 'month').startOf('month'), dayjs().endOf('month')] },
-  { label: '近半年', value: [dayjs().subtract(5, 'month').startOf('month'), dayjs().endOf('month')] },
-  { label: '今年', value: [dayjs().startOf('year'), dayjs().endOf('month')] },
-  { label: '去年', value: [dayjs().subtract(1, 'year').startOf('year'), dayjs().subtract(1, 'year').endOf('year')] }
+const PRESETS: Array<{ key: Preset; label: string }> = [
+  { key: '6m', label: '近 6 个月' },
+  { key: '12m', label: '近 12 个月' },
+  { key: 'ytd', label: '今年' },
+  { key: 'ly', label: '去年' },
+  { key: 'all', label: '全部' },
+  { key: 'custom', label: '自定义' }
 ];
 
-/** 饼图的数据项：在 ECharts 标准字段之外挂了 count / percent 供 tooltip 使用 */
-interface PieDatum {
-  name: string;
-  value: number;
-  count: number;
-  percent: number;
-  itemStyle: { color: string };
+function presetRange(p: Preset, now: Period): { from?: Period; to?: Period } {
+  const year = Number(now.slice(0, 4));
+  switch (p) {
+    case '6m':
+      return { from: shiftPeriod(now, -5), to: now };
+    case '12m':
+      return { from: shiftPeriod(now, -11), to: now };
+    case 'ytd':
+      return { from: `${year}-01`, to: now };
+    case 'ly':
+      return { from: `${year - 1}-01`, to: `${year - 1}-12` };
+    default:
+      return {};
+  }
 }
 
-interface StatCardProps {
-  label: ReactNode;
-  value: ReactNode;
-  extra?: ReactNode;
-  primary?: boolean;
-  tone?: StatTone;
-  icon?: ReactNode;
+function safePeriod(raw: string | null): Period | undefined {
+  try {
+    return normalizePeriod(raw);
+  } catch {
+    return undefined;
+  }
 }
 
-function StatCard({ label, value, extra, primary, tone = 'teal', icon }: StatCardProps) {
+function StatTile({ label, value, sub }: { label: string; value: number; sub?: string }) {
   return (
-    <div className={`stat-card tone-${tone}${primary ? ' primary' : ''}`}>
-      <div className="stat-head">
-        {icon ? <span className="stat-ico">{icon}</span> : null}
-        <span className="stat-label">{label}</span>
-      </div>
-      <div className="stat-value">{value}</div>
-      {extra ? <div className="stat-extra">{extra}</div> : null}
+    <div className="tile">
+      <p className="tile-label">{label}</p>
+      <p className="tile-value">
+        <Money value={value} />
+      </p>
+      <p className="tile-sub">{sub || ' '}</p>
     </div>
   );
 }
 
+interface RankItem {
+  key: string;
+  name: string;
+  total: number;
+  count: number;
+  /** 类别有自己的颜色；名称没有，统一用强调色 */
+  color: string;
+  dot: boolean;
+}
+
+/** 排行：金额、占比、笔数都直接写出来，横条只是辅助比较长短 */
+function RankList({ items, total }: { items: RankItem[]; total: number }) {
+  const [all, setAll] = useState(false);
+  const max = Math.max(0, ...items.map((i) => i.total));
+  const shown = all ? items : items.slice(0, 8);
+  return (
+    <>
+      <ol className="rank">
+        {shown.map((it) => (
+          <li key={it.key} className="rank-row">
+            {it.dot && <span className="dot" style={{ background: it.color }} />}
+            <span className="rank-name">{it.name}</span>
+            <span className="rank-count">{it.count} 笔</span>
+            <span className="rank-amount">{money(it.total)}</span>
+            <span className="rank-pct">{percent(it.total, total)}</span>
+            <span className="rank-track">
+              <span className="rank-fill" style={{ width: `${max ? (it.total / max) * 100 : 0}%`, background: it.color }} />
+            </span>
+          </li>
+        ))}
+      </ol>
+      {items.length > 8 && (
+        <button type="button" className="text-btn rank-more" onClick={() => setAll((v) => !v)}>
+          {all ? '收起' : `显示全部 ${items.length} 项`}
+        </button>
+      )}
+    </>
+  );
+}
+
 export default function StatsPage() {
-  const { message } = AntApp.useApp();
+  const { version, slots } = useLedger();
+  const navigate = useNavigate();
+  const narrow = useIsNarrow();
+  const [params, setParams] = useSearchParams();
+  const now = currentPeriod();
 
-  const [granularity, setGranularity] = useState<Granularity>('month');
-  const [range, setRange] = useState<DateRange>([dayjs().startOf('year'), dayjs().endOf('month')]);
+  /* ---------------- 筛选条件（放在地址栏里，刷新不丢） ---------------- */
+
+  const preset: Preset = PRESETS.some((p) => p.key === params.get('r')) ? (params.get('r') as Preset) : '12m';
+  const granularity: Granularity = params.get('g') === 'year' ? 'year' : 'month';
+  const isYear = granularity === 'year';
+  const customFrom = safePeriod(params.get('from')) ?? shiftPeriod(now, -5);
+  const customTo = safePeriod(params.get('to')) ?? now;
+  const range =
+    preset === 'custom'
+      ? { from: customFrom < customTo ? customFrom : customTo, to: customFrom < customTo ? customTo : customFrom }
+      : presetRange(preset, now);
+
+  const update = (change: Record<string, string | null>) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const [k, v] of Object.entries(change)) {
+          if (v === null) next.delete(k);
+          else next.set(k, v);
+        }
+        return next;
+      },
+      { replace: true }
+    );
+
+  const choosePreset = (p: Preset) =>
+    update(p === 'custom' ? { r: p, from: range.from ?? customFrom, to: range.to ?? customTo } : { r: p, from: null, to: null });
+
+  /* ---------------- 数据 ---------------- */
+
   const [data, setData] = useState<StatsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [pieMode, setPieMode] = useState<PieMode>('category');
-
-  /* ECharts 的 option 是纯 JS 对象，读不到 CSS 变量，配色得单独喂一份 */
-  const scheme = useColorScheme();
-  const ct = useMemo(() => chartTheme(scheme), [scheme]);
-  const isNarrow = useIsNarrow();
-  /* 手机上图表矮一些，否则一屏只装得下一张图 */
-  const chartHeight = isNarrow ? 220 : 300;
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: StatsQuery = { granularity };
-      if (range && range[0]) params.from = range[0].format('YYYY-MM');
-      if (range && range[1]) params.to = range[1].format('YYYY-MM');
-      const res = await api.fetchStats(params);
-      setData(res);
-    } catch (e) {
-      message.error(errMsg(e));
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [granularity, range, message]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const seq = useRef(0);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    const mine = ++seq.current;
+    setLoading(true);
+    api
+      .fetchStats({ from: range.from, to: range.to, granularity })
+      .then((res) => {
+        if (mine !== seq.current) return;
+        setData(res);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (mine === seq.current) setError(errMsg(e, '加载失败'));
+      })
+      .finally(() => {
+        if (mine === seq.current) setLoading(false);
+      });
+    // version：账本里记了新账，统计跟着刷新
+  }, [range.from, range.to, granularity, version]);
 
-  const periods: PeriodStat[] = (data && data.byPeriod) || [];
-  const isYear = granularity === 'year';
+  const periods: PeriodStat[] = data?.byPeriod ?? [];
+  const total = data?.total ?? 0;
+  const filled = periods.filter((p) => p.total > 0);
+  const average = filled.length ? total / filled.length : 0;
+  const peak = filled.reduce<PeriodStat | undefined>((best, p) => (!best || p.total > best.total ? p : best), undefined);
+  const periodName = (key: string) => (isYear ? `${key}年` : monthLabel(key));
 
-  const pieData = useMemo<PieDatum[]>(() => {
+  const [view, setView] = useState<'chart' | 'table'>('chart');
+  const [by, setBy] = useState<'category' | 'name'>('category');
+
+  const rankItems = useMemo<RankItem[]>(() => {
     if (!data) return [];
-    const src = pieMode === 'category' ? data.byCategory : data.byName;
-    return (src || []).map((it) => ({
-      name: it.name,
-      value: Number(it.total || 0),
-      count: it.count,
-      percent: it.percent,
-      itemStyle: { color: it.color }
+    const source: NameStat[] = by === 'category' ? data.byCategory : data.byName;
+    return source.map((s) => ({
+      key: s.name,
+      name: s.name,
+      total: s.total,
+      count: s.count,
+      // 类别用和账本一致的颜色；名称太多、颜色分不过来，统一用强调色比长短
+      color: by === 'category' ? slotColor(slots.get(s.name) ?? 0) : 'var(--accent)',
+      dot: by === 'category'
     }));
-  }, [data, pieMode]);
+  }, [data, by, slots]);
 
   const hasData = !!data && data.recordCount > 0;
 
-  /**
-   * X 轴标签。窄屏用短标签 —— 「2026年01月」9 个字在 390px 宽里即使斜排也会互相压住，
-   * 「01月」则不用旋转就排得下。按年统计时 key 本身就是「2026」，直接用。
-   */
-  const axisLabels = useMemo(
-    () => periods.map((p) => (isNarrow ? (isYear ? p.key : periodShort(p.key)) : p.label)),
-    [periods, isNarrow, isYear]
+  /* ---------------- 渲染 ---------------- */
+
+  const filters = (
+    <div className="filters">
+      <div className="filter-chips" role="group" aria-label="时间范围">
+        {PRESETS.map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            aria-pressed={preset === p.key}
+            className={cls('chip', preset === p.key && 'is-on')}
+            onClick={() => choosePreset(p.key)}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      {preset === 'custom' && (
+        <div className="range-row">
+          <MonthField value={customFrom} onChange={(p) => update({ from: p })}>
+            <button type="button" className="field-btn">
+              {monthLabel(customFrom)}
+              <Icon name="chevronDown" size={14} />
+            </button>
+          </MonthField>
+          <span className="range-sep">到</span>
+          <MonthField value={customTo} onChange={(p) => update({ to: p })}>
+            <button type="button" className="field-btn">
+              {monthLabel(customTo)}
+              <Icon name="chevronDown" size={14} />
+            </button>
+          </MonthField>
+        </div>
+      )}
+      <Segmented<Granularity>
+        className="filter-gran"
+        size="small"
+        value={granularity}
+        onChange={(g) => update({ g: g === 'year' ? 'year' : null })}
+        options={[
+          { label: '按月', value: 'month' },
+          { label: '按年', value: 'year' }
+        ]}
+      />
+    </div>
   );
 
-  /* 三个关键指标做数字滚动。hook 必须无条件调用，所以 data 为 null 时传 0 */
-  const animatedTotal = useCountUp(data?.total ?? 0);
-  const animatedCount = useCountUp(data?.recordCount ?? 0);
-  const animatedMax = useCountUp(data?.maxAmount ?? 0);
-
-  const barOption = useMemo<EChartsOption>(
-    () => ({
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'shadow' },
-        valueFormatter: (v) => yuan(toNum(v))
-      },
-      grid: { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
-      xAxis: {
-        type: 'category',
-        data: axisLabels,
-        axisTick: { show: false },
-        axisLine: { lineStyle: { color: ct.axisLine } },
-        axisLabel: {
-          color: ct.axisLabel,
-          interval: 0,
-          rotate: isNarrow ? 0 : periods.length > 8 ? 30 : 0,
-          fontSize: isNarrow ? 10 : 11
-        }
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: { color: ct.axisLabelMuted, formatter: (v: number) => `¥${v}` },
-        splitLine: { lineStyle: { color: ct.splitLine } }
-      },
-      series: [
-        {
-          type: 'bar',
-          name: '支出',
-          barMaxWidth: 40,
-          data: periods.map((p) => Number(p.total || 0)),
-          itemStyle: {
-            borderRadius: [6, 6, 0, 0],
-            // global:false → 每根柱子内部独立渐变，而不是整组共用一段渐变
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              global: false,
-              colorStops: [
-                { offset: 0, color: ct.bar[0] },
-                { offset: 0.55, color: ct.bar[1] },
-                { offset: 1, color: ct.bar[2] }
-              ]
-            }
-          },
-          emphasis: {
-            itemStyle: {
-              color: {
-                type: 'linear',
-                x: 0,
-                y: 0,
-                x2: 0,
-                y2: 1,
-                global: false,
-                colorStops: [
-                  { offset: 0, color: ct.barHover[0] },
-                  { offset: 1, color: ct.barHover[1] }
-                ]
-              }
-            }
-          },
-          label: {
-            show: !isNarrow && periods.length <= 14,
-            position: 'top',
-            color: ct.barLabel,
-            fontSize: 10,
-            formatter: (p) => money(toNum(p.value))
-          }
-        }
-      ]
-    }),
-    [periods, axisLabels, isNarrow, ct]
-  );
-
-  /** 累计支出趋势：一眼看出这一年花了多少、什么时候被拉高的 */
-  const cumulativeOption = useMemo<EChartsOption>(() => {
-    let acc = 0;
-    const values = periods.map((p) => {
-      acc = sumAmounts([acc, p.total]);
-      return acc;
-    });
-    return {
-      tooltip: {
-        trigger: 'axis',
-        valueFormatter: (v) => yuan(toNum(v))
-      },
-      grid: { left: 8, right: 16, top: 24, bottom: 8, containLabel: true },
-      xAxis: {
-        type: 'category',
-        boundaryGap: false,
-        data: axisLabels,
-        axisTick: { show: false },
-        axisLine: { lineStyle: { color: ct.axisLine } },
-        axisLabel: {
-          color: ct.axisLabel,
-          fontSize: isNarrow ? 10 : 11,
-          rotate: isNarrow ? 0 : periods.length > 8 ? 30 : 0
-        }
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: { color: ct.axisLabelMuted, formatter: (v: number) => `¥${v}` },
-        splitLine: { lineStyle: { color: ct.splitLine } }
-      },
-      series: [
-        {
-          type: 'line',
-          name: '累计支出',
-          smooth: true,
-          symbolSize: 6,
-          data: values,
-          itemStyle: { color: ct.lineSymbol, borderColor: ct.pieBorder, borderWidth: 1 },
-          lineStyle: { width: 2.5, color: ct.lineStroke },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              global: false,
-              colorStops: [
-                { offset: 0, color: ct.area[0] },
-                { offset: 1, color: ct.area[1] }
-              ]
-            }
-          }
-        }
-      ]
-    };
-  }, [periods, axisLabels, isNarrow, ct]);
-
-  const pieOption = useMemo<EChartsOption>(
-    () => ({
-      tooltip: {
-        trigger: 'item',
-        formatter: (p) => {
-          // trigger:'item' 运行时只会给单个对象，但类型上是「对象或数组」的并集
-          const it = Array.isArray(p) ? p[0] : p;
-          return `${it.name}<br/>${yuan(toNum(it.value))}<br/>占比 ${it.percent}%`;
-        }
-      },
-      legend: {
-        type: 'scroll',
-        // 窄屏图例放底部横排：竖排图例会把饼图挤成一条
-        orient: isNarrow ? 'horizontal' : 'vertical',
-        ...(isNarrow ? { bottom: 0, left: 'center' } : { right: 4, top: 'middle' }),
-        textStyle: { color: ct.legendText, fontSize: 12 },
-        formatter: (name: string) => (name.length > 10 ? `${name.slice(0, 10)}…` : name)
-      },
-      series: [
-        {
-          type: 'pie',
-          radius: ['46%', '72%'],
-          center: isNarrow ? ['50%', '42%'] : ['36%', '50%'],
-          avoidLabelOverlap: true,
-          label: { show: false },
-          itemStyle: { borderColor: ct.pieBorder, borderWidth: 2 },
-          data: pieData
-        }
-      ]
-    }),
-    [pieData, isNarrow, ct]
-  );
-
-  const periodColumns: TableColumnsType<PeriodStat> = [
-    {
-      title: isYear ? '年份' : '月份',
-      dataIndex: 'label',
-      width: isNarrow ? 92 : undefined,
-      // 手机上用原始值「2026-01」：中文标签「2026年01月」在窄列里会竖排折成两行
-      render: (v: string, row: PeriodStat) =>
-        isNarrow ? (
-          <span>{row.key}</span>
-        ) : (
-          <Space size={6}>
-            <span>{v}</span>
-            {!isYear && row.key && <span className="muted">{row.key}</span>}
-          </Space>
-        )
-    },
-    {
-      title: '支出金额',
-      dataIndex: 'total',
-      align: 'right',
-      width: isNarrow ? 110 : 160,
-      sorter: (a, b) => Number(a.total) - Number(b.total),
-      render: (v: number) => <b>{yuan(v)}</b>
-    },
-    {
-      title: '占比',
-      dataIndex: 'percent',
-      width: isNarrow ? 120 : 220,
-      render: (v: number) => (
-        <Progress
-          percent={Number(v || 0)}
-          size="small"
-          strokeColor={{ '0%': ct.progress[0], '100%': ct.progress[1] }}
-          format={(p) => `${p}%`}
-        />
-      )
-    },
-    // 明细条数在手机上是可以牺牲的信息，让出宽度给金额和占比
-    ...(isNarrow
-      ? []
-      : [
-          {
-            title: '明细条数',
-            dataIndex: 'count',
-            align: 'right' as const,
-            width: 100,
-            render: (v: number) => <span>{v} 条</span>
-          }
-        ])
-  ];
+  if (error && !data) {
+    return (
+      <div className="page stats">
+        {filters}
+        <div className="card empty">
+          <p className="empty-title">加载失败</p>
+          <p className="empty-text">{error}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="page">
-      <Card className="section-card stats-filter" size="small">
-        <Row gutter={[12, 12]} align="middle" justify="space-between" className="stats-bar">
-          <Col>
-            <Space wrap className="stats-range">
-              <Segmented<Granularity>
-                value={granularity}
-                onChange={setGranularity}
-                // 窄屏用短标签，否则分段控件 + 区间选择器一行放不下
-                options={[
-                  { label: isNarrow ? '按月' : '按月统计', value: 'month' },
-                  { label: isNarrow ? '按年' : '按年统计', value: 'year' }
-                ]}
-              />
-              <RangePicker
-                picker="month"
-                allowClear={false}
-                value={range}
-                onChange={(v) => {
-                  // allowClear={false} 下运行时不会给 null，但类型上两端都可空，这里显式收口
-                  if (v && v[0] && v[1]) setRange([v[0], v[1]]);
-                }}
-                presets={RANGE_PRESETS}
-                format="YYYY-MM"
-              />
-            </Space>
-          </Col>
-          <Col>
-            <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
-              {isNarrow ? '' : '刷新'}
-            </Button>
-          </Col>
-        </Row>
-      </Card>
+    <div className="page stats">
+      {filters}
 
-      <Row gutter={[12, 12]} className="stat-row">
-        <Col xs={12} sm={12} lg={6}>
-          <StatCard
-            primary
-            tone="teal"
-            icon={<WalletOutlined />}
-            label="区间支出合计"
-            value={yuan(animatedTotal)}
-            extra={
-              data && data.fromPeriod
-                ? `${periodLabel(data.fromPeriod)} ~ ${periodLabel(data.toPeriod)}`
-                : '暂无数据'
-            }
-          />
-        </Col>
-        <Col xs={12} sm={12} lg={6}>
-          <StatCard
-            tone="sage"
-            icon={<UnorderedListOutlined />}
-            label="明细条数"
-            value={Math.round(animatedCount)}
-            extra={data ? `覆盖 ${data.monthCount} 个月 · 平均每月 ${yuan(data.avgPerMonth)}` : '—'}
-          />
-        </Col>
-        <Col xs={12} sm={12} lg={6}>
-          <StatCard
-            tone="amber"
-            icon={<RiseOutlined />}
-            label="最大单笔"
-            value={yuan(animatedMax)}
-            extra={
-              data && data.maxAmountName
-                ? `${data.maxAmountName} · ${periodLabel(data.maxAmountPeriod)}`
-                : '—'
-            }
-          />
-        </Col>
-        <Col xs={12} sm={12} lg={6}>
-          <StatCard
-            tone="cyan"
-            icon={<TagsOutlined />}
-            label="支出名称数 / 分类数"
-            value={data ? `${(data.byName || []).length} / ${(data.byCategory || []).length}` : '0 / 0'}
-            extra="明细名称 / 顶级分类"
-          />
-        </Col>
-      </Row>
+      <div className={cls('stats-body', loading && 'is-refreshing')} aria-busy={loading}>
+        <p className="stats-range">
+          {data?.fromPeriod && data.toPeriod ? rangeLabel(data.fromPeriod, data.toPeriod) : ' '}
+        </p>
 
-      <Card
-        className="section-card bar-teal"
-        size="small"
-        title={isYear ? '每年支出' : '每月支出'}
-        extra={
-          <span className="muted">
-            共 {periods.length} 个{isYear ? '年份' : '月份'}
-          </span>
-        }
-      >
-        {hasData ? (
-          <Chart option={barOption} height={chartHeight} />
+        <div className="tiles">
+          <StatTile label="支出合计" value={total} sub={hasData ? `${data.recordCount} 笔` : '没有记录'} />
+          <StatTile
+            label={isYear ? '年均' : '月均'}
+            value={average}
+            sub={filled.length ? `按 ${filled.length} 个有记录的${isYear ? '年份' : '月份'}` : undefined}
+          />
+          <StatTile label={isYear ? '最高的一年' : '最高的月份'} value={peak?.total ?? 0} sub={peak ? periodName(peak.key) : undefined} />
+          <StatTile
+            label="最大一笔"
+            value={data?.maxAmount ?? 0}
+            sub={data?.maxAmountName ? `${data.maxAmountName} · ${data.maxAmountPeriod ? monthSmart(data.maxAmountPeriod) : ''}` : undefined}
+          />
+        </div>
+
+        {!hasData && !loading ? (
+          <div className="card empty">
+            <p className="empty-title">这段时间没有记录</p>
+            <p className="empty-text">换个时间范围看看。</p>
+          </div>
         ) : (
-          <Chart empty height={chartHeight} emptyText="所选区间内暂无支出记录" />
-        )}
-      </Card>
-
-      <Row gutter={[12, 12]}>
-        <Col xs={24} lg={14}>
-          <Card
-            className="section-card"
-            size="small"
-            title="累计支出趋势"
-            extra={<span className="muted">看进度，判断后面还能花多少</span>}
-          >
-            {hasData ? (
-              <Chart option={cumulativeOption} height={chartHeight} />
-            ) : (
-              <Chart empty height={chartHeight} emptyText="暂无数据" />
-            )}
-          </Card>
-        </Col>
-        <Col xs={24} lg={10}>
-          <Card
-            className="section-card bar-violet"
-            size="small"
-            title="支出构成"
-            extra={
-              <Radio.Group
-                size="small"
-                value={pieMode}
-                onChange={(e) => setPieMode(e.target.value as PieMode)}
-                optionType="button"
-                buttonStyle="solid"
-                options={[
-                  { label: '按分类', value: 'category' },
-                  { label: '按名称', value: 'name' }
-                ]}
-              />
-            }
-          >
-            {hasData && pieData.length ? (
-              <Chart option={pieOption} height={isNarrow ? 280 : chartHeight} />
-            ) : (
-              <Chart empty height={isNarrow ? 280 : chartHeight} emptyText="暂无数据" />
-            )}
-          </Card>
-        </Col>
-      </Row>
-
-      <Card
-        className="section-card"
-        size="small"
-        title={isYear ? '按年明细' : '按月明细'}
-      >
-        <Table<PeriodStat>
-          rowKey="key"
-          size="small"
-          loading={loading}
-          dataSource={periods}
-          columns={periodColumns}
-          scroll={{ x: isNarrow ? 340 : 560 }}
-          pagination={periods.length > 12 ? { pageSize: 12, size: 'small' } : false}
-          locale={{ emptyText: <Empty description="暂无统计数据" /> }}
-          summary={() => {
-            if (!periods.length) return null;
-            const sum = sumAmounts(periods.map((p) => p.total));
-            const count = periods.reduce((s, p) => s + Number(p.count || 0), 0);
-            return (
-              <Table.Summary.Row>
-                <Table.Summary.Cell index={0}>
-                  <b>合计</b>
-                  {/* 窄屏没有「明细条数」列，把条数并进合计单元格，别让它挤出表格 */}
-                  {isNarrow && <span className="muted"> · {count} 条</span>}
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={1} align="right">
-                  <b style={{ color: ct.summaryText }}>{yuan(sum)}</b>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={2}>
-                  <Tag bordered={false}>100%</Tag>
-                </Table.Summary.Cell>
-                {!isNarrow && (
-                  <Table.Summary.Cell index={3} align="right">
-                    <Tooltip title="区间内所有明细条数">
-                      <span>{count} 条</span>
-                    </Tooltip>
-                  </Table.Summary.Cell>
-                )}
-              </Table.Summary.Row>
-            );
-          }}
-        />
-      </Card>
-
-      <Card className="section-card bar-teal" size="small" title="支出名称排行">
-        {data && (data.byName || []).length ? (
-          <Row gutter={[12, 12]}>
-            {(data.byName || []).slice(0, 12).map((it) => (
-              <Col xs={24} sm={12} lg={8} key={it.name}>
-                <div style={{ padding: '4px 0' }}>
-                  <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                    <Space size={6}>
-                      <span
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: 4,
-                          background: it.color,
-                          display: 'inline-block'
-                        }}
-                      />
-                      <span>{it.name}</span>
-                      <span className="muted">{it.count} 条</span>
-                    </Space>
-                    <Space size={6}>
-                      <b>{yuan(it.total)}</b>
-                      <span className="muted">{it.percent}%</span>
-                    </Space>
-                  </Space>
-                  <Progress
-                    percent={Number(it.percent || 0)}
-                    showInfo={false}
-                    size="small"
-                    strokeColor={it.color}
-                  />
+          <>
+            <section className="card">
+              <div className="card-head">
+                <div className="card-title-row">
+                  <h2 className="card-title">{isYear ? '每年支出' : '每月支出'}</h2>
+                  {view === 'chart' && average > 0 && (
+                    <span className="legend-avg">
+                      <i aria-hidden="true" />
+                      {isYear ? '年均' : '月均'} {compact(average)}
+                    </span>
+                  )}
                 </div>
-              </Col>
-            ))}
-          </Row>
-        ) : (
-          <Empty description="暂无数据" />
+                <Segmented
+                  size="small"
+                  value={view}
+                  onChange={(v) => setView(v as 'chart' | 'table')}
+                  options={[
+                    { label: '图表', value: 'chart' },
+                    { label: '列表', value: 'table' }
+                  ]}
+                />
+              </div>
+
+              {view === 'chart' ? (
+                <>
+                  <BarChart
+                    height={narrow ? 180 : 240}
+                    data={periods.map((p) => ({
+                      key: p.key,
+                      label: periodName(p.key),
+                      short: isYear ? p.key : `${Number(p.key.slice(5))}月`,
+                      value: p.total
+                    }))}
+                    average={average}
+                    tip={(d) => (
+                      <span className="tip">
+                        <b>{yuan(d.value)}</b>
+                        <span>{d.label}</span>
+                      </span>
+                    )}
+                    onSelect={(d) =>
+                      isYear
+                        ? update({ r: 'custom', from: `${d.key}-01`, to: `${d.key}-12`, g: null })
+                        : navigate(d.key === now ? '/' : `/?m=${d.key}`)
+                    }
+                  />
+                  <p className="card-hint">{isYear ? '点柱子查看那一年的每个月' : '点柱子打开那个月的账本'}</p>
+                </>
+              ) : (
+                <div className="table-wrap">
+                  <table className="ptable">
+                    <thead>
+                      <tr>
+                        <th>{isYear ? '年份' : '月份'}</th>
+                        <th className="num">支出</th>
+                        <th className="num">占比</th>
+                        <th className="num">笔数</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {periods.map((p) => (
+                        <tr key={p.key} className={p.total ? undefined : 'is-empty'}>
+                          <td>{periodName(p.key)}</td>
+                          <td className="num">{p.total ? money(p.total) : '—'}</td>
+                          <td className="num">{p.total ? percent(p.total, total) : '—'}</td>
+                          <td className="num">{p.count || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td>合计</td>
+                        <td className="num">{money(total)}</td>
+                        <td className="num">100%</td>
+                        <td className="num">{data?.recordCount ?? 0}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            <section className="card">
+              <div className="card-head">
+                <h2 className="card-title">花在哪里</h2>
+                <Segmented
+                  size="small"
+                  value={by}
+                  onChange={(v) => setBy(v as 'category' | 'name')}
+                  options={[
+                    { label: '按类别', value: 'category' },
+                    { label: '按名称', value: 'name' }
+                  ]}
+                />
+              </div>
+              {by === 'category' && (
+                <CompositionBar
+                  segments={rankItems.map((r) => ({ key: r.key, label: r.name, value: r.total, slot: slots.get(r.name) ?? 0 }))}
+                  total={total}
+                />
+              )}
+              <RankList key={by} items={rankItems} total={total} />
+            </section>
+          </>
         )}
-      </Card>
+      </div>
     </div>
   );
 }

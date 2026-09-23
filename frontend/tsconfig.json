@@ -27,5 +27,7 @@
 
     "paths": { "@ledger/shared": ["../packages/shared/src/index.ts"] }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts"],
+  /* 纯逻辑的单测跑在 bun test 里（根目录 bun test 会一并跑到），不参与前端的类型检查 */
+  "exclude": ["src/**/*.test.ts"]
 }
