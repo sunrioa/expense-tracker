@@ -2,6 +2,8 @@ import { currentPeriod, normalizePeriod, roundAmount } from '@ledger/shared';
 import type {
   BatchFillRequest,
   BatchFillResult,
+  CopyMonthRequest,
+  CopyMonthResult,
   DeleteResult,
   Period,
   RecordNode,
@@ -11,6 +13,7 @@ import type {
 } from '@ledger/shared';
 import type { RecordRepository } from '../db/repository';
 import { planBatchFill, plannedTotal } from '../domain/batch';
+import { copyCreatedCount, copyTotal, planCopyMonth } from '../domain/copy';
 import { BusinessError } from '../domain/errors';
 import {
   buildForest,
@@ -227,7 +230,39 @@ export function createExpenseService(repo: RecordRepository) {
     };
   }
 
-  return { tree, leaves, options, periods, create, update, remove, batchFill };
+  /**
+   * 整月复制：规划同样是纯函数（planCopyMonth）。落库顺序和批量生成一样 ——
+   * 先插新的顶级条目拿到真实 id，再把子项的占位引用换成真实 id 批量插入。
+   */
+  async function copyMonth(request: CopyMonthRequest): Promise<CopyMonthResult> {
+    const plan = planCopyMonth(await repo.findAll(), request.from, request.to);
+
+    const newIds = new Map<number, number>();
+    for (const t of plan.topsToCreate) {
+      const created = await repo.insert({
+        parentId: null,
+        name: t.name,
+        detail: t.detail,
+        amount: t.amount,
+        period: plan.to
+      });
+      newIds.set(t.sourceId, created.id);
+    }
+
+    await repo.insertMany(
+      plan.children.map((c) => ({
+        parentId: c.parent.kind === 'existing' ? c.parent.id : (newIds.get(c.parent.sourceId) ?? null),
+        name: c.name,
+        detail: c.detail,
+        amount: c.amount,
+        period: plan.to
+      }))
+    );
+
+    return { created: copyCreatedCount(plan), skipped: plan.skipped, totalAmount: copyTotal(plan) };
+  }
+
+  return { tree, leaves, options, periods, create, update, remove, batchFill, copyMonth };
 }
 
 export type ExpenseService = ReturnType<typeof createExpenseService>;

@@ -55,6 +55,31 @@ export function yearOf(period: Period | null | undefined): number {
   return m ? Number(m[1]) : 0;
 }
 
+/** yyyy-MM → 从公元 0 年 1 月起算的月序号，方便做加减。格式不对返回 undefined。 */
+function monthIndex(period: Period): number | undefined {
+  const m = /^(\d{4})-(\d{2})$/.exec(period);
+  return m ? Number(m[1]) * 12 + Number(m[2]) - 1 : undefined;
+}
+
+/**
+ * 月份平移：shiftPeriod('2026-01', -1) → '2025-12'。
+ * 格式不对时原样返回 —— 调用方拿到的一定是个字符串，不用到处判空。
+ */
+export function shiftPeriod(period: Period, delta: number): Period {
+  const idx = monthIndex(period);
+  if (idx === undefined) return period;
+  const next = idx + Math.trunc(delta);
+  const y = Math.floor(next / 12);
+  return `${String(y).padStart(4, '0')}-${String(next - y * 12 + 1).padStart(2, '0')}`;
+}
+
+/** 两个月份相差几个月：monthsBetween('2026-01', '2026-03') → 2；to 更早时为负，格式不对为 0。 */
+export function monthsBetween(from: Period, to: Period): number {
+  const a = monthIndex(from);
+  const b = monthIndex(to);
+  return a === undefined || b === undefined ? 0 : b - a;
+}
+
 /** 区间内连续月份列表（含两端）。from/to 缺失时返回空数组。 */
 export function periodRange(
   from: Period | null | undefined,

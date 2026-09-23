@@ -10,6 +10,7 @@ export * from './types';
 export type {
   BatchFillItem,
   BatchFillRequest,
+  CopyMonthRequest,
   OptionsQuery,
   RangeQuery,
   RecordPatch,

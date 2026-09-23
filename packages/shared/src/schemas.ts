@@ -73,6 +73,16 @@ export const batchFillRequestSchema = z.object({
 });
 export type BatchFillRequest = z.infer<typeof batchFillRequestSchema>;
 
+/**
+ * POST /api/records/copy —— 把一个月的全部记录复制到另一个月。
+ * 月份走宽松写法，由 normalizePeriod 统一校验，非法时报 400。
+ */
+export const copyMonthRequestSchema = z.object({
+  from: z.string('请选择要复制的月份'),
+  to: z.string('请选择复制到哪个月')
+});
+export type CopyMonthRequest = z.infer<typeof copyMonthRequestSchema>;
+
 /* ============================================================ 查询参数 */
 
 /** /records/tree 与 /records/leaves */

@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import {
   InvalidPeriodError,
   inPeriodRange,
+  monthsBetween,
   normalizePeriod,
   periodLabelCN,
   periodRange,
+  shiftPeriod,
   yearOf
 } from './period';
 
@@ -82,5 +84,31 @@ describe('periodLabelCN / yearOf', () => {
     expect(yearOf('2026-09')).toBe(2026);
     expect(yearOf('乱码')).toBe(0);
     expect(yearOf(undefined)).toBe(0);
+  });
+});
+
+describe('shiftPeriod / monthsBetween', () => {
+  test('跨年平移', () => {
+    expect(shiftPeriod('2026-01', -1)).toBe('2025-12');
+    expect(shiftPeriod('2025-12', 1)).toBe('2026-01');
+    expect(shiftPeriod('2026-09', -21)).toBe('2024-12');
+    expect(shiftPeriod('2026-09', 0)).toBe('2026-09');
+  });
+
+  test('格式不对原样返回', () => {
+    expect(shiftPeriod('abc', 1)).toBe('abc');
+  });
+
+  test('相差的月数，更早为负', () => {
+    expect(monthsBetween('2026-01', '2026-03')).toBe(2);
+    expect(monthsBetween('2025-11', '2026-02')).toBe(3);
+    expect(monthsBetween('2026-03', '2026-01')).toBe(-2);
+    expect(monthsBetween('2026-03', 'abc')).toBe(0);
+  });
+
+  test('两者互逆', () => {
+    for (const d of [-30, -13, -1, 0, 1, 11, 12, 25]) {
+      expect(monthsBetween('2026-09', shiftPeriod('2026-09', d))).toBe(d);
+    }
   });
 });

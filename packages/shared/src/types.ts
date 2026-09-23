@@ -63,6 +63,16 @@ export interface BatchFillResult {
   totalAmount: number;
 }
 
+/** 复制整月的结果 */
+export interface CopyMonthResult {
+  /** 新增了几行（顶级条目 + 子项） */
+  created: number;
+  /** 目标月已有同名条目而跳过的行数 */
+  skipped: number;
+  /** 新增行的金额合计（分组本身不计金额） */
+  totalAmount: number;
+}
+
 /** 删除结果 */
 export interface DeleteResult {
   /** 连同子项一共删掉几行 */

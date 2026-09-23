@@ -180,6 +180,30 @@ describe('batchFill 落库', () => {
   });
 });
 
+describe('copyMonth 落库', () => {
+  test('分组连同子项复制到新月份，子项挂到新建的分组下', async () => {
+    const res = await service.copyMonth({ from: '2026-09', to: '2026-10' });
+    expect(res).toEqual({ created: 4, skipped: 0, totalAmount: 2881.25 });
+
+    const october = await service.tree({ from: '2026-10', to: '2026-10' });
+    expect(october.map((n) => [n.name, n.subtotal])).toEqual([
+      ['交通', 400.5],
+      ['吃', 2480.75]
+    ]);
+    const traffic = october.find((n) => n.name === '交通')!;
+    expect(traffic.id).not.toBe(1);
+    expect(traffic.children.map((c) => c.name)).toEqual(['单车', '地铁']);
+    // 源月份原封不动
+    expect((await service.tree({ from: '2026-09', to: '2026-09' })).length).toBe(2);
+  });
+
+  test('重复执行全部跳过', async () => {
+    await service.copyMonth({ from: '2026-09', to: '2026-10' });
+    const second = await service.copyMonth({ from: '2026-09', to: '2026-10' });
+    expect(second).toEqual({ created: 0, skipped: 3, totalAmount: 0 });
+  });
+});
+
 describe('查询', () => {
   test('tree / leaves / options / periods', async () => {
     expect((await service.tree({})).map((n) => n.name)).toEqual(['交通', '吃']);

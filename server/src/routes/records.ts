@@ -1,5 +1,6 @@
 import {
   batchFillRequestSchema,
+  copyMonthRequestSchema,
   optionsQuerySchema,
   rangeQuerySchema,
   recordPatchSchema,
@@ -42,6 +43,11 @@ export function recordRoutes(service: ExpenseService) {
     /** 按月批量生成：若干子项 × 一段月份 */
     .post('/batch', validate('json', batchFillRequestSchema), async (c) =>
       c.json(ok(await service.batchFill(c.req.valid('json'))))
+    )
+
+    /** 整月复制：把 from 月的全部记录复制到 to 月，已有的同名条目跳过 */
+    .post('/copy', validate('json', copyMonthRequestSchema), async (c) =>
+      c.json(ok(await service.copyMonth(c.req.valid('json'))))
     )
 
     .put(

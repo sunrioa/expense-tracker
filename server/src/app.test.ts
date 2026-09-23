@@ -121,6 +121,30 @@ describe('HTTP 契约', () => {
     expect(body.data).toMatchObject({ months: 12, created: 12, parentCreated: 12, totalAmount: 38400 });
   });
 
+  test('整月复制', async () => {
+    const app = makeApp(SEED);
+    const post = (body: unknown) =>
+      app.request('/api/records/copy', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+    const first = await json(await post({ from: '2026-09', to: '2026-10' }));
+    expect(first).toMatchObject({ success: true, data: { created: 3, skipped: 0, totalAmount: 280 } });
+
+    const again = await json(await post({ from: '2026-09', to: '2026-10' }));
+    expect(again.data).toMatchObject({ created: 0, skipped: 2 });
+
+    const same = await post({ from: '2026-09', to: '2026-09' });
+    expect(same.status).toBe(400);
+    expect((await json(same)).message).toBe('源月份和目标月份相同，不需要复制');
+
+    const missing = await post({ to: '2026-10' });
+    expect(missing.status).toBe(400);
+    expect((await json(missing)).message).toContain('请选择要复制的月份');
+  });
+
   test('统计接口', async () => {
     const body = await json(await makeApp(SEED).request('/api/stats?from=2026-09&to=2026-09'));
     expect(body.data).toMatchObject({ granularity: 'month', total: 280, recordCount: 2, monthCount: 1 });
